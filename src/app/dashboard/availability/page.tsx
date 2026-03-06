@@ -1,27 +1,30 @@
 ﻿'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSessionUser } from '@/hooks/use-session-user'
 import { Calendar, Check, X, HelpCircle, Loader2, Clock, MapPin } from 'lucide-react'
 
-interface Match {
+type AvailabilityStatus = 'YES' | 'NO' | 'MAYBE' | null
+
+type Match = {
   id: string
   date: string
   time: string
   homeTeam: string
   awayTeam: string
   field: string
-  myStatus: 'YES' | 'NO' | 'MAYBE' | null
+  location: string
+  seasonName: string
+  myStatus: AvailabilityStatus
 }
 
 export default function AvailabilityPage() {
-  const router = useRouter()
   const { user, loading: userLoading } = useSessionUser()
   const [loading, setLoading] = useState(true)
   const [matches, setMatches] = useState<Match[]>([])
   const [saving, setSaving] = useState<string | null>(null)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     if (userLoading) {
@@ -33,37 +36,71 @@ export default function AvailabilityPage() {
       return
     }
 
-    fetchMatches()
-    setLoading(false)
+    void fetchMatches()
   }, [user, userLoading])
 
   const fetchMatches = async () => {
-    // Mock upcoming matches
-    setMatches([
-      { id: 'm1', date: '2026-03-08', time: '10:00 AM', homeTeam: 'FC United', awayTeam: 'City Kickers', field: 'Field 1', myStatus: null },
-      { id: 'm2', date: '2026-03-08', time: '12:00 PM', homeTeam: 'Riverside FC', awayTeam: 'FC United', field: 'Field 2', myStatus: null },
-      { id: 'm3', date: '2026-03-15', time: '10:00 AM', homeTeam: 'FC United', awayTeam: 'Thunder FC', field: 'Field 1', myStatus: null },
-      { id: 'm4', date: '2026-03-15', time: '02:00 PM', homeTeam: 'City Kickers', awayTeam: 'Riverside FC', field: 'Field 3', myStatus: null },
-      { id: 'm5', date: '2026-03-22', time: '11:00 AM', homeTeam: 'Wolf Pack', awayTeam: 'FC United', field: 'Field 2', myStatus: null },
-    ])
+    setLoading(true)
+    setError('')
+
+    try {
+      const res = await fetch('/api/availability')
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to load availability')
+      }
+
+      setMatches(data.matches || [])
+    } catch (err) {
+      console.error('Failed to fetch availability:', err)
+      setError(err instanceof Error ? err.message : 'Failed to load availability')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const updateStatus = async (matchId: string, status: 'YES' | 'NO' | 'MAYBE') => {
+  const updateStatus = async (matchId: string, status: Exclude<AvailabilityStatus, null>) => {
     setSaving(matchId)
-    
-    // Update local state
-    setMatches(matches.map(m => 
-      m.id === matchId ? { ...m, myStatus: status } : m
-    ))
+    setError('')
 
-    // In production: call API to save availability
-    // await fetch('/api/availability', {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify({ matchId, status }),
-    // })
+    const previous = matches
+    setMatches((current) => current.map((match) => (
+      match.id === matchId ? { ...match, myStatus: status } : match
+    )))
 
-    setSaving(null)
+    try {
+      const res = await fetch('/api/availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matchId, status }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to save availability')
+      }
+    } catch (err) {
+      console.error('Failed to save availability:', err)
+      setMatches(previous)
+      setError(err instanceof Error ? err.message : 'Failed to save availability')
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  const stats = useMemo(() => ({
+    yes: matches.filter((match) => match.myStatus === 'YES').length,
+    maybe: matches.filter((match) => match.myStatus === 'MAYBE').length,
+    no: matches.filter((match) => match.myStatus === 'NO').length,
+  }), [matches])
+
+  if (userLoading || loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
+      </div>
+    )
   }
 
   if (!user) {
@@ -77,36 +114,36 @@ export default function AvailabilityPage() {
     )
   }
 
-  const yesCount = matches.filter(m => m.myStatus === 'YES').length
-  const noCount = matches.filter(m => m.myStatus === 'NO').length
-  const maybeCount = matches.filter(m => m.myStatus === 'MAYBE').length
-
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-3xl mx-auto">
       <div className="glass-card p-6">
         <h1 className="text-2xl font-bold text-white mb-2">Match Availability</h1>
-        <p className="text-white/50 mb-6">Let your team know if you can play</p>
+        <p className="text-white/50 mb-6">Mark your status for upcoming rostered matches.</p>
 
-        {/* Stats */}
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="glass-card p-4 text-center">
-            <p className="text-2xl font-bold text-green-400">{yesCount}</p>
+            <p className="text-2xl font-bold text-green-400">{stats.yes}</p>
             <p className="text-white/50 text-sm">Available</p>
           </div>
           <div className="glass-card p-4 text-center">
-            <p className="text-2xl font-bold text-yellow-400">{maybeCount}</p>
+            <p className="text-2xl font-bold text-yellow-400">{stats.maybe}</p>
             <p className="text-white/50 text-sm">Maybe</p>
           </div>
           <div className="glass-card p-4 text-center">
-            <p className="text-2xl font-bold text-red-400">{noCount}</p>
+            <p className="text-2xl font-bold text-red-400">{stats.no}</p>
             <p className="text-white/50 text-sm">Unavailable</p>
           </div>
         </div>
 
-        {/* Matches */}
+        {error && (
+          <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-red-300">
+            {error}
+          </div>
+        )}
+
         <div className="space-y-4">
           {matches.map((match) => (
-            <div key={match.id} className="glass-card p-4">
+            <div key={match.id} className="glass-card p-4" data-testid="availability-match-card">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-lg bg-cyan-500/20 flex items-center justify-center">
@@ -116,7 +153,7 @@ export default function AvailabilityPage() {
                     <p className="text-white font-semibold">
                       {match.homeTeam} vs {match.awayTeam}
                     </p>
-                    <div className="flex items-center gap-3 text-white/40 text-sm">
+                    <div className="flex flex-wrap items-center gap-3 text-white/40 text-sm">
                       <span className="flex items-center gap-1">
                         <Calendar className="w-3 h-3" />
                         {match.date}
@@ -127,14 +164,14 @@ export default function AvailabilityPage() {
                       </span>
                       <span className="flex items-center gap-1">
                         <MapPin className="w-3 h-3" />
-                        {match.field}
+                        {match.field} · {match.location}
                       </span>
                     </div>
+                    <p className="text-xs text-white/30 mt-1">{match.seasonName}</p>
                   </div>
                 </div>
               </div>
 
-              {/* Status Buttons */}
               <div className="flex gap-2">
                 <button
                   onClick={() => updateStatus(match.id, 'YES')}
@@ -144,15 +181,10 @@ export default function AvailabilityPage() {
                       ? 'bg-green-500 text-black'
                       : 'bg-white/5 text-white hover:bg-green-500/20'
                   }`}
+                  data-testid={`availability-yes-${match.id}`}
                 >
-                  {saving === match.id ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4" />
-                      I'll Play
-                    </>
-                  )}
+                  {saving === match.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  I&apos;ll Play
                 </button>
                 <button
                   onClick={() => updateStatus(match.id, 'MAYBE')}
@@ -162,6 +194,7 @@ export default function AvailabilityPage() {
                       ? 'bg-yellow-500 text-black'
                       : 'bg-white/5 text-white hover:bg-yellow-500/20'
                   }`}
+                  data-testid={`availability-maybe-${match.id}`}
                 >
                   <HelpCircle className="w-4 h-4" />
                   Maybe
@@ -174,9 +207,10 @@ export default function AvailabilityPage() {
                       ? 'bg-red-500 text-white'
                       : 'bg-white/5 text-white hover:bg-red-500/20'
                   }`}
+                  data-testid={`availability-no-${match.id}`}
                 >
                   <X className="w-4 h-4" />
-                  Can't Play
+                  Can&apos;t Play
                 </button>
               </div>
             </div>
@@ -185,17 +219,9 @@ export default function AvailabilityPage() {
 
         {matches.length === 0 && (
           <p className="text-white/40 text-center py-8">
-            No upcoming matches scheduled
+            No upcoming rostered matches scheduled yet.
           </p>
         )}
-
-        {/* Info */}
-        <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-          <p className="text-blue-300 text-sm">
-            <strong>Reminder:</strong> Please mark your availability at least 24 hours 
-            before each match. This helps captains plan substitutions.
-          </p>
-        </div>
       </div>
     </div>
   )

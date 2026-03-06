@@ -301,7 +301,8 @@ export async function DELETE(
       await prisma.$transaction([
         prisma.teamPlayer.deleteMany({ where: { userId: id } }),
         prisma.ledger.deleteMany({ where: { userId: id } }),
-        prisma.sub.deleteMany({ where: { playerId: id } }),
+        prisma.sub.deleteMany({ where: { OR: [{ requestedById: id }, { claimedById: id }] } }),
+        prisma.matchAvailability.deleteMany({ where: { userId: id } }),
         prisma.disciplinaryAction.deleteMany({ where: { userId: id } }),
         prisma.backgroundCheck.deleteMany({ where: { userId: id } }),
         prisma.volunteerShift.deleteMany({ where: { userId: id } }),
