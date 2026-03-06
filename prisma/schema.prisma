@@ -72,6 +72,7 @@ enum AuditActionType {
   ACTIVATE
   DEACTIVATE
   EXPORT
+  SEND
 }
 
 enum AuditEntityType {
@@ -80,6 +81,14 @@ enum AuditEntityType {
   INSURANCE_POLICY
   USER
   REPORT
+  COMMUNICATION
+}
+
+enum EmailDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
 }
 
 model User {
@@ -532,6 +541,8 @@ model RegistrationForm {
   baseFee             Float               @default(150.00)
   earlyBirdFee        Float?              // Optional early bird discount
   lateFee             Float?              // Optional late penalty
+  paymentThankYouSubject String?
+  paymentThankYouBody String?
   
   // Custom fields (JSON)
   customFields        Json                @default("[]")
@@ -540,6 +551,32 @@ model RegistrationForm {
   updatedAt           DateTime            @updatedAt
 
   season              Season              @relation(fields: [seasonId], references: [id])
+}
+
+model OutboundEmail {
+  id                   String              @id @default(uuid())
+  toEmail              String
+  toName               String?
+  subject              String
+  htmlBody             String
+  textBody             String?
+  status               EmailDeliveryStatus @default(PENDING)
+  templateType         String?
+  audienceType         String?
+  sentByUserId         String?
+  relatedRegistrationId String?
+  relatedSeasonId      String?
+  relatedTeamId        String?
+  relatedDivisionId    String?
+  errorMessage         String?
+  metadata             Json?
+  createdAt            DateTime            @default(now())
+  sentAt               DateTime?
+
+  @@index([status, createdAt])
+  @@index([toEmail, createdAt])
+  @@index([relatedRegistrationId, createdAt])
+  @@index([relatedSeasonId, createdAt])
 }
 
 model DiscountCode {

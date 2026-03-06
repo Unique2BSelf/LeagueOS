@@ -27,6 +27,8 @@ interface RegistrationFormData {
   baseFee: number;
   earlyBirdFee: number | null;
   lateFee: number | null;
+  paymentThankYouSubject: string;
+  paymentThankYouBody: string;
   customFields: CustomField[];
 }
 
@@ -46,6 +48,8 @@ export default function RegistrationFormBuilder() {
     baseFee: 150,
     earlyBirdFee: null,
     lateFee: null,
+    paymentThankYouSubject: '',
+    paymentThankYouBody: '',
     customFields: [],
   });
 
@@ -63,6 +67,8 @@ export default function RegistrationFormBuilder() {
           customFields: data.customFields || [],
           earlyBirdFee: data.earlyBirdFee || null,
           lateFee: data.lateFee || null,
+          paymentThankYouSubject: data.paymentThankYouSubject || '',
+          paymentThankYouBody: data.paymentThankYouBody || '',
           requireWaiver: data.requireWaiver || false,
           waiverText: data.waiverText || 'I hereby release the league, its officers, agents, and volunteers from any and all liability for any injury or loss arising from my participation in league activities. I understand that soccer is a contact sport and injuries can occur. I certify that I am in good physical condition to participate in this league and have no medical conditions that would prevent me from playing. I agree to follow all league rules and policies.',
         });
@@ -291,6 +297,35 @@ export default function RegistrationFormBuilder() {
                   min="0"
                   step="0.01"
                 />
+              </div>
+            </div>
+          </div>
+
+          <div className="glass-card p-4">
+            <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+              <FileText className="w-5 h-5" />
+              Payment Confirmation Email
+            </h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-white/70 mb-1">Thank-you Subject</label>
+                <input
+                  type="text"
+                  value={formData.paymentThankYouSubject}
+                  onChange={(e) => setFormData({ ...formData, paymentThankYouSubject: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white"
+                  placeholder="Thanks for registering with Corridor Soccer"
+                />
+              </div>
+              <div>
+                <label className="block text-white/70 mb-1">Thank-you Message</label>
+                <textarea
+                  value={formData.paymentThankYouBody}
+                  onChange={(e) => setFormData({ ...formData, paymentThankYouBody: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white h-28"
+                  placeholder="Thanks for registering. We are excited to have you this season."
+                />
+                <p className="text-white/40 text-xs mt-1">This message is included in the registration receipt email after successful payment.</p>
               </div>
             </div>
           </div>

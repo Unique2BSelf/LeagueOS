@@ -24,6 +24,8 @@ export async function GET(request: NextRequest) {
         baseFee: 150.00,
         earlyBirdFee: null,
         lateFee: null,
+        paymentThankYouSubject: '',
+        paymentThankYouBody: '',
         customFields: [],
       });
     }

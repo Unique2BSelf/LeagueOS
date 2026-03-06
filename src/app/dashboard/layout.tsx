@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { Home, User, CreditCard, Users, Calendar, Settings, Shield, Heart, ShoppingCart, BarChart3, AlertTriangle, Menu, X, ChevronDown, FileText, Ticket, ClipboardList, DollarSign, ClipboardCheck, ExternalLink, Lock, History } from 'lucide-react';
+import { Home, User, CreditCard, Users, Calendar, Settings, Shield, Heart, ShoppingCart, BarChart3, AlertTriangle, Menu, X, ChevronDown, FileText, Ticket, ClipboardList, DollarSign, ClipboardCheck, ExternalLink, Lock, History, Megaphone } from 'lucide-react';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -67,6 +67,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         { href: '/dashboard/analytics', icon: BarChart3, label: 'Analytics' },
         { href: '/dashboard/reports', icon: FileText, label: 'Reports' },
         { href: '/dashboard/audit-logs', icon: History, label: 'Audit Logs' },
+        { href: '/dashboard/communications', icon: Megaphone, label: 'Communications' },
         { href: '/dashboard/users', icon: Users, label: 'Users' },
         { href: '/dashboard/ringers', icon: AlertTriangle, label: 'Ringers' },
         { href: '/dashboard/insurance', icon: Shield, label: 'Insurance' },
