@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getAdminActor } from '@/lib/admin-auth';
 
 // GET /api/admin/teams - List all teams for admin (with filters)
 export async function GET(request: NextRequest) {
   try {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Check if user is admin
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.role !== 'ADMIN') {
+    const actor = await getAdminActor(request);
+    if (!actor) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -19,17 +14,19 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status'); // PENDING, APPROVED, REJECTED
     const seasonId = searchParams.get('seasonId');
 
-    // For now, we use in-memory storage for teams (as per the existing API)
-    // In production, this would query the database
-    const { teams } = await import('@/app/api/teams/route');
-    let allTeams = Array.from(teams.values());
+    const where: Record<string, unknown> = {};
+    if (status) where.approvalStatus = status;
+    if (seasonId) where.seasonId = seasonId;
 
-    if (status) {
-      allTeams = allTeams.filter((t: any) => t.approvalStatus === status);
-    }
-    if (seasonId) {
-      allTeams = allTeams.filter((t: any) => t.seasonId === seasonId);
-    }
+    const allTeams = await prisma.team.findMany({
+      where,
+      include: {
+        season: true,
+        division: true,
+        players: true,
+      },
+      orderBy: { name: 'asc' },
+    });
 
     return NextResponse.json(allTeams);
   } catch (error) {
@@ -41,14 +38,8 @@ export async function GET(request: NextRequest) {
 // PATCH /api/admin/teams - Approve or reject teams
 export async function PATCH(request: NextRequest) {
   try {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Check if user is admin
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.role !== 'ADMIN') {
+    const actor = await getAdminActor(request);
+    if (!actor) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -63,23 +54,25 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'rejectionReason required for rejection' }, { status: 400 });
     }
 
-    // Use in-memory storage for teams
-    const { teams } = await import('@/app/api/teams/route');
     const results = [];
 
     for (const teamId of teamIds) {
-      const team = teams.get(teamId);
+      const team = await prisma.team.findUnique({ where: { id: teamId } });
       if (team) {
-        if (action === 'APPROVE') {
-          team.approvalStatus = 'APPROVED';
-          team.isConfirmed = true;
-          team.rejectionReason = null;
-        } else {
-          team.approvalStatus = 'REJECTED';
-          team.rejectionReason = rejectionReason;
-        }
-        teams.set(teamId, team);
-        results.push(team);
+        const updated = await prisma.team.update({
+          where: { id: teamId },
+          data: action === 'APPROVE'
+            ? {
+                approvalStatus: 'APPROVED',
+                isConfirmed: true,
+                rejectionReason: null,
+              }
+            : {
+                approvalStatus: 'REJECTED',
+                rejectionReason,
+              },
+        });
+        results.push(updated);
       }
     }
 

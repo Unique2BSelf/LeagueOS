@@ -75,7 +75,7 @@ export default function CreateTeamPage() {
       }
 
       const team = await res.json()
-      router.push(`/teams/${team.id}`)
+      router.push(`/dashboard/teams/${team.id}`)
     } catch (err: any) {
       setError(err.message)
     } finally {

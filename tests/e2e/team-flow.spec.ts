@@ -1,0 +1,80 @@
+import { expect, test } from '@playwright/test';
+
+function uniqueEmail(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}@leagueos.local`;
+}
+
+async function bootstrapSession(page: import('@playwright/test').Page, options: {
+  email: string;
+  fullName: string;
+  role: 'ADMIN' | 'CAPTAIN' | 'PLAYER';
+}) {
+  const response = await page.request.post('/api/test/session', {
+    data: options,
+  });
+  expect(response.ok()).toBeTruthy();
+
+  const setCookieHeader = response.headers()['set-cookie'];
+  const sessionMatch = setCookieHeader?.match(/leagueos_session=([^;]+)/);
+  expect(sessionMatch?.[1]).toBeTruthy();
+  const cookieUrl = process.env.PLAYWRIGHT_BASE_URL || 'https://dev.corridor.soccer';
+
+  await page.context().addCookies([
+    {
+      name: 'leagueos_session',
+      value: sessionMatch![1],
+      url: cookieUrl,
+      httpOnly: true,
+      sameSite: 'Lax',
+      secure: true,
+    },
+  ]);
+}
+
+test.describe('MVP team flow', () => {
+  test('player can request to join and captain/admin can see the pending roster entry', async ({ browser, baseURL }) => {
+    const adminContext = await browser.newContext({ baseURL });
+    const adminPage = await adminContext.newPage();
+    const adminEmail = uniqueEmail('pw-team-admin');
+
+    await bootstrapSession(adminPage, {
+      email: adminEmail,
+      fullName: 'Playwright Team Admin',
+      role: 'ADMIN',
+    });
+
+    await adminPage.goto('/dashboard/teams/create');
+    const teamName = `Roster FC ${Date.now()}`;
+    await adminPage.getByPlaceholder('Enter team name').fill(teamName);
+    await adminPage.getByRole('button', { name: 'Create Team' }).click();
+    await adminPage.waitForURL((url) => /\/dashboard\/teams\/(?!create$)[^/]+$/.test(url.pathname));
+
+    const teamUrl = adminPage.url();
+    const teamId = teamUrl.split('/').pop();
+    expect(teamId).toBeTruthy();
+
+    const playerContext = await browser.newContext({ baseURL });
+    const playerPage = await playerContext.newPage();
+    const playerEmail = uniqueEmail('pw-team-player');
+
+    await bootstrapSession(playerPage, {
+      email: playerEmail,
+      fullName: 'Playwright Team Player',
+      role: 'PLAYER',
+    });
+
+    await playerPage.goto('/dashboard/teams/join');
+    await playerPage.getByPlaceholder(/Enter invite code/i).fill(teamId!);
+    await playerPage.getByRole('button', { name: 'Lookup' }).click();
+    await expect(playerPage.getByTestId('team-lookup-result')).toBeVisible();
+    await playerPage.getByRole('button', { name: /Request to Join/i }).click();
+    await expect(playerPage.getByText(new RegExp(`Request sent to ${teamName}`))).toBeVisible();
+
+    await adminPage.reload();
+    await expect(adminPage.getByText('Playwright Team Player')).toBeVisible();
+    await expect(adminPage.getByText('PENDING')).toBeVisible();
+
+    await playerContext.close();
+    await adminContext.close();
+  });
+});

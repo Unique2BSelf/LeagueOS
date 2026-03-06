@@ -183,7 +183,7 @@ function JoinTeamContent() {
               <input
                 type="text"
                 value={inviteCode}
-                onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                onChange={(e) => setInviteCode(e.target.value)}
                 className="flex-1 bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white uppercase"
                 placeholder="Enter invite code (e.g., TEAM-ABC123)"
               />
@@ -197,7 +197,7 @@ function JoinTeamContent() {
             </div>
 
             {team && (
-              <div className="mt-6 glass-card p-4 border-2 border-cyan-500/30">
+              <div data-testid="team-lookup-result" className="mt-6 glass-card p-4 border-2 border-cyan-500/30">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     <div 
@@ -233,7 +233,7 @@ function JoinTeamContent() {
             
             <div className="space-y-3">
               {teams.map((team) => (
-                <div key={team.id} className="glass-card p-4 hover:border-cyan-500/30 cursor-pointer transition" onClick={() => joinTeam(team.id)}>
+                <div data-testid={`browse-team-${team.id}`} key={team.id} className="glass-card p-4 hover:border-cyan-500/30 cursor-pointer transition" onClick={() => joinTeam(team.id)}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold" style={{ backgroundColor: team.primaryColor, color: team.secondaryColor }}>
