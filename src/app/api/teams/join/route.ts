@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSessionFromRequest } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
   try {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) {
+    const session = await getSessionFromRequest(request);
+    if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    const userId = session.userId;
 
     const body = await request.json().catch(() => null);
     const teamId = typeof body?.teamId === 'string' ? body.teamId : '';
@@ -29,6 +31,30 @@ export async function POST(request: NextRequest) {
 
     if (existing) {
       return NextResponse.json({ error: 'You already requested or joined this team' }, { status: 400 });
+    }
+
+    const existingSeasonMembership = await prisma.teamPlayer.findFirst({
+      where: {
+        userId,
+        status: 'APPROVED',
+        team: {
+          seasonId: team.seasonId,
+        },
+      },
+      include: {
+        team: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    if (existingSeasonMembership) {
+      return NextResponse.json({
+        error: `You are already rostered on ${existingSeasonMembership.team.name} for this season`,
+      }, { status: 409 });
     }
 
     const teamPlayer = await prisma.teamPlayer.create({

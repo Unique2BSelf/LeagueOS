@@ -43,6 +43,7 @@ export default function TeamDashboardPage() {
   const [inviteLoading, setInviteLoading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState('')
+  const [rosterActionLoading, setRosterActionLoading] = useState<string | null>(null)
   const [isCaptain, setIsCaptain] = useState(false)
 
   useEffect(() => {
@@ -138,6 +139,32 @@ export default function TeamDashboardPage() {
   }
 
   const isInviteValid = team?.inviteCode && team?.inviteCodeExpiry && new Date(team.inviteCodeExpiry) > new Date()
+  const canManageRoster = isCaptain || user?.role === 'ADMIN'
+
+  const updateRosterEntry = async (targetUserId: string, action: 'APPROVE' | 'REMOVE' | 'REJECT') => {
+    setRosterActionLoading(`${action}-${targetUserId}`)
+    setError('')
+
+    try {
+      const res = await fetch(`/api/teams/${teamId}/players`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: targetUserId, action }),
+        credentials: 'include',
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to update roster')
+      }
+
+      await fetchTeamData(teamId, user!.id)
+    } catch (err: any) {
+      setError(err.message || 'Failed to update roster')
+    } finally {
+      setRosterActionLoading(null)
+    }
+  }
 
   if (sessionLoading || loading) {
     return (
@@ -267,7 +294,7 @@ export default function TeamDashboardPage() {
         {players.length > 0 ? (
           <div className="space-y-2">
             {players.map((player) => (
-              <div key={player.userId} className="flex items-center justify-between p-3 bg-white/5 rounded-lg">
+              <div key={player.userId} className="flex items-center justify-between gap-3 p-3 bg-white/5 rounded-lg" data-testid="team-roster-entry">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center">
                     <Users className="w-5 h-5 text-cyan-400" />
@@ -283,6 +310,40 @@ export default function TeamDashboardPage() {
                   }`}>
                     {player.status}
                   </span>
+                  {canManageRoster && (
+                    <div className="mt-2 flex justify-end gap-2">
+                      {player.status === 'PENDING' && (
+                        <>
+                          <button
+                            onClick={() => updateRosterEntry(player.userId, 'APPROVE')}
+                            disabled={!!rosterActionLoading}
+                            className="rounded-md bg-green-500/20 px-2 py-1 text-xs text-green-300 hover:bg-green-500/30 disabled:opacity-50"
+                            data-testid={`approve-player-${player.userId}`}
+                          >
+                            {rosterActionLoading === `APPROVE-${player.userId}` ? 'Approving...' : 'Approve'}
+                          </button>
+                          <button
+                            onClick={() => updateRosterEntry(player.userId, 'REJECT')}
+                            disabled={!!rosterActionLoading}
+                            className="rounded-md bg-red-500/20 px-2 py-1 text-xs text-red-300 hover:bg-red-500/30 disabled:opacity-50"
+                            data-testid={`reject-player-${player.userId}`}
+                          >
+                            {rosterActionLoading === `REJECT-${player.userId}` ? 'Rejecting...' : 'Reject'}
+                          </button>
+                        </>
+                      )}
+                      {player.status === 'APPROVED' && player.userId !== team?.captainId && (
+                        <button
+                          onClick={() => updateRosterEntry(player.userId, 'REMOVE')}
+                          disabled={!!rosterActionLoading}
+                          className="rounded-md bg-red-500/20 px-2 py-1 text-xs text-red-300 hover:bg-red-500/30 disabled:opacity-50"
+                          data-testid={`remove-player-${player.userId}`}
+                        >
+                          {rosterActionLoading === `REMOVE-${player.userId}` ? 'Removing...' : 'Remove'}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

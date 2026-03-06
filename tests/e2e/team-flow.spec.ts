@@ -32,7 +32,7 @@ async function bootstrapSession(page: import('@playwright/test').Page, options: 
 }
 
 test.describe('MVP team flow', () => {
-  test('player can request to join and captain/admin can see the pending roster entry', async ({ browser, baseURL }) => {
+  test('captain/admin can approve and remove roster entries after a player requests to join', async ({ browser, baseURL }) => {
     const adminContext = await browser.newContext({ baseURL });
     const adminPage = await adminContext.newPage();
     const adminEmail = uniqueEmail('pw-team-admin');
@@ -71,8 +71,14 @@ test.describe('MVP team flow', () => {
     await expect(playerPage.getByText(new RegExp(`Request sent to ${teamName}`))).toBeVisible();
 
     await adminPage.reload();
-    await expect(adminPage.getByText('Playwright Team Player')).toBeVisible();
-    await expect(adminPage.getByText('PENDING')).toBeVisible();
+    const rosterEntry = adminPage.getByTestId('team-roster-entry').filter({ hasText: 'Playwright Team Player' }).first();
+    await expect(rosterEntry).toBeVisible();
+    await expect(rosterEntry).toContainText('PENDING');
+    await rosterEntry.locator(`[data-testid^="approve-player-"]`).click();
+    await expect(rosterEntry).toContainText('APPROVED');
+
+    await rosterEntry.locator(`[data-testid^="remove-player-"]`).click();
+    await expect(adminPage.getByText('Playwright Team Player')).toHaveCount(0);
 
     await playerContext.close();
     await adminContext.close();
