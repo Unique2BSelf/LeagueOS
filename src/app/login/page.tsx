@@ -1,15 +1,17 @@
-'use client'
+﻿'use client'
 
 import { useState, Suspense } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Trophy, Loader2, Mail, Lock } from 'lucide-react'
+import { setStoredUser } from '@/lib/client-auth'
 
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const registered = searchParams.get('registered')
-  
+  const redirect = searchParams.get('redirect')
+
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -41,9 +43,9 @@ function LoginForm() {
       if (!res.ok) {
         setError(data.error || 'Login failed')
       } else {
-        // Store user session
-        localStorage.setItem('league_user', JSON.stringify(data))
-        router.push('/dashboard')
+        setStoredUser(data)
+        router.push(redirect && redirect.startsWith('/') ? redirect : '/dashboard')
+        router.refresh()
       }
     } catch {
       setError('Something went wrong')
@@ -68,7 +70,7 @@ function LoginForm() {
       <div className="glass-card rounded-xl p-8">
         {registered && (
           <div className="mb-6 p-4 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 text-sm">
-            ✓ Account created! Please sign in.
+            Account created. Please sign in.
           </div>
         )}
 
@@ -111,7 +113,7 @@ function LoginForm() {
                 value={formData.password}
                 onChange={handleChange}
                 className="w-full pl-10 pr-4 py-3 rounded-lg bg-white/5 border border-white/10 focus:border-cyan-400 focus:outline-none focus:ring-1 focus:ring-cyan-400 transition-colors text-white placeholder-white/30"
-                placeholder="••••••••"
+                placeholder="********"
                 required
               />
             </div>
@@ -141,15 +143,6 @@ function LoginForm() {
             </Link>
           </p>
         </div>
-      </div>
-
-      <div className="mt-8 text-center">
-        <p className="text-white/30 text-xs">
-          Demo: admin@league.os, moderator@league.os, referee@league.os, captain@league.os, player@league.os, sponsor@league.os
-        </p>
-        <p className="text-white/30 text-xs mt-1">
-          Password: TestPass123!
-        </p>
       </div>
     </div>
   )

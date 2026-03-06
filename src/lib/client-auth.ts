@@ -2,35 +2,76 @@
 
 export interface StoredUser {
   id: string;
-  fullName?: string;
-  email?: string;
-  role?: string;
+  fullName: string;
+  email: string;
+  role: string;
   photoUrl?: string | null;
+  [key: string]: unknown;
 }
 
-export function getStoredUser(): StoredUser | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
+const STORAGE_KEY = 'league_user';
 
-  const raw = window.localStorage.getItem("league_user");
-  if (!raw) {
+export function getStoredUser(): StoredUser | null {
+  if (typeof window === 'undefined') {
     return null;
   }
 
   try {
-    return JSON.parse(raw) as StoredUser;
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as StoredUser) : null;
   } catch {
     return null;
   }
 }
 
-export function getAuthHeaders(init?: HeadersInit): HeadersInit {
-  const user = getStoredUser();
+export function setStoredUser(user: StoredUser): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
 
-  return {
-    ...(init || {}),
-    ...(user?.id ? { "x-user-id": user.id } : {}),
-  };
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
 }
 
+export function clearStoredUser(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.removeItem(STORAGE_KEY);
+}
+
+export async function syncStoredUser(): Promise<StoredUser | null> {
+  try {
+    const response = await fetch('/api/auth/session', {
+      method: 'GET',
+      credentials: 'include',
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      clearStoredUser();
+      return null;
+    }
+
+    const user = (await response.json()) as StoredUser;
+    setStoredUser(user);
+    return user;
+  } catch {
+    return getStoredUser();
+  }
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } finally {
+    clearStoredUser();
+  }
+}
+
+export function getAuthHeaders(init?: HeadersInit): HeadersInit {
+  return init || {};
+}

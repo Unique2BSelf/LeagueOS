@@ -1,7 +1,7 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
-import { Lock, Unlock, AlertCircle, Search, RefreshCw } from 'lucide-react';
+import { Lock, Unlock, AlertCircle, RefreshCw } from 'lucide-react';
 
 interface LockedUser {
   id: string;
@@ -19,10 +19,7 @@ export default function LockedUsersPage() {
 
   const fetchLockedUsers = async () => {
     try {
-      const user = JSON.parse(localStorage.getItem('league_user') || '{}');
-      const res = await fetch('/api/admin/locked-users', {
-        headers: { 'x-user-id': user.id }
-      });
+      const res = await fetch('/api/admin/locked-users');
       if (res.ok) {
         const data = await res.json();
         setLockedUsers(data);
@@ -40,17 +37,13 @@ export default function LockedUsersPage() {
   const releaseUser = async (userId: string) => {
     setReleasing(userId);
     try {
-      const adminUser = JSON.parse(localStorage.getItem('league_user') || '{}');
       const res = await fetch('/api/admin/release-user', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-id': adminUser.id 
-        },
-        body: JSON.stringify({ userId })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
       });
       if (res.ok) {
-        setLockedUsers(lockedUsers.filter(u => u.id !== userId));
+        setLockedUsers(lockedUsers.filter((user) => user.id !== userId));
       }
     } catch (err) {
       console.error('Failed to release user:', err);
@@ -90,14 +83,12 @@ export default function LockedUsersPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {lockedUsers.map(user => (
+          {lockedUsers.map((user) => (
             <div key={user.id} className="glass-card p-4 border-l-4 border-red-500">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
-                    <span className="text-red-400 font-bold text-xl">
-                      {user.fullName.charAt(0)}
-                    </span>
+                    <span className="text-red-400 font-bold text-xl">{user.fullName.charAt(0)}</span>
                   </div>
                   <div>
                     <h3 className="font-semibold">{user.fullName}</h3>
@@ -105,24 +96,12 @@ export default function LockedUsersPage() {
                     <div className="flex items-center gap-2 mt-1">
                       <AlertCircle size={14} className="text-red-400" />
                       <span className="text-sm text-red-400">{user.lockReason}</span>
-                      {user.unpaidAmount > 0 && (
-                        <span className="text-sm font-bold text-red-400">
-                          ${user.unpaidAmount.toFixed(2)}
-                        </span>
-                      )}
+                      {user.unpaidAmount > 0 && <span className="text-sm font-bold text-red-400">${user.unpaidAmount.toFixed(2)}</span>}
                     </div>
                   </div>
                 </div>
-                <button
-                  onClick={() => releaseUser(user.id)}
-                  disabled={releasing === user.id}
-                  className="btn-primary bg-green-600 hover:bg-green-500 flex items-center gap-2"
-                >
-                  {releasing === user.id ? (
-                    <RefreshCw size={16} className="animate-spin" />
-                  ) : (
-                    <Unlock size={16} />
-                  )}
+                <button onClick={() => releaseUser(user.id)} disabled={releasing === user.id} className="btn-primary bg-green-600 hover:bg-green-500 flex items-center gap-2">
+                  {releasing === user.id ? <RefreshCw size={16} className="animate-spin" /> : <Unlock size={16} />}
                   Release
                 </button>
               </div>

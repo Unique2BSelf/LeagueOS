@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useParams } from 'next/navigation'
@@ -91,9 +91,8 @@ function JoinWithCodeContent() {
     try {
       const res = await fetch('/api/teams/invite/join', {
         method: 'PUT',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
-          'x-user-id': user.id,
         },
         body: JSON.stringify({
           inviteCode: code,
@@ -182,7 +181,7 @@ function JoinWithCodeContent() {
               {team?.name?.slice(0, 2).toUpperCase() || 'TM'}
             </div>
             <h1 className="text-2xl font-bold text-white">{team?.name}</h1>
-            <p className="text-white/50">{team?.division} • {team?.season}</p>
+            <p className="text-white/50">{team?.division} â€¢ {team?.season}</p>
           </div>
 
           <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-4 mb-6">
@@ -254,3 +253,4 @@ export default function JoinTeamPage() {
     </Suspense>
   )
 }
+
