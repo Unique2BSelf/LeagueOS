@@ -1,0 +1,488 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  MODERATOR
+  REF
+  CAPTAIN
+  PLAYER
+  SPONSOR
+}
+
+enum MatchStatus {
+  SCHEDULED
+  LIVE
+  FINAL
+  DISPUTED
+  RAINOUT
+  FORFEIT
+}
+
+enum TransactionType {
+  REGISTRATION
+  FINE
+  REF_PAYOUT
+  SPONSORSHIP
+  DONATION
+  REFUND
+  REIMBURSEMENT
+}
+
+model User {
+  id                String              @id @default(uuid())
+  role              Role                @default(PLAYER)
+  fullName          String
+  email             String              @unique
+  password          String
+  photoUrl          String?
+  isInsured         Boolean             @default(false)
+  insuranceExpiry   DateTime?
+  eloRating         Int                 @default(1200)
+  isGoalie          Boolean             @default(false)
+  // Skill Matrix (1-5)
+  skillSpeed        Int                 @default(3)
+  skillTechnical   Int                 @default(3)
+  skillStamina     Int                 @default(3)
+  skillTeamwork    Int                 @default(3)
+  skillDefense     Int                 @default(3)
+  skillAttack      Int                 @default(3)
+  // Free agent status
+  isFreeAgent      Boolean             @default(false)
+  freeAgentSeasonId String?
+  
+  taxIdEncrypted    String?
+  isActive          Boolean             @default(true)
+  backgroundCheckStatus String?          @default("PENDING")
+  lockReason         String?
+  suspensionEndDate  DateTime?
+  hideFromDirectory Boolean             @default(false)
+  createdAt         DateTime            @default(now())
+
+  teams             TeamPlayer[]
+  ledgers           Ledger[]
+  subs              Sub[]
+  businesses        Business[]
+  disciplinary      DisciplinaryAction[]
+  ratings           RefRating[]         @relation("RaterRatings")
+  refRatings        RefRating[]         @relation("RefRatings")
+  backgroundChecks  BackgroundCheck[]
+  volunteerShifts   VolunteerShift[]
+  refereedMatches   Match[]             @relation("MatchRef")
+  orders            Order[]
+  registrations     Registration[]
+  insurancePolicies InsurancePolicy[]
+  messages          Message[]
+}
+
+model Team {
+  id                String              @id @default(uuid())
+  name              String
+  captainId         String
+  divisionId        String
+  primaryColor      String
+  secondaryColor   String
+  jerseyPhotoUrl    String?
+  escrowTarget      Float
+  currentBalance    Float               @default(0)
+  isConfirmed       Boolean             @default(false)
+  approvalStatus    String              @default("PENDING") // PENDING, APPROVED, REJECTED
+  rejectionReason   String?             // Reason if rejected
+  subQuotaRemaining Int                 @default(10)
+  sponsorId         String?
+  seasonId          String
+  // Invite code for players to join
+  inviteCode        String?             @unique
+  inviteCodeExpiry  DateTime?
+  // Captain credits for free subs/rewards
+  captainCredits    Float               @default(0)
+  captainCreditUsage Float              @default(0) // Track used credits
+
+  players           TeamPlayer[]
+  homeMatches       Match[]             @relation("Home")
+  awayMatches       Match[]             @relation("Away")
+  season            Season              @relation(fields: [seasonId], references: [id])
+  division          Division            @relation(fields: [divisionId], references: [id])
+}
+
+model TeamPlayer {
+  userId    String
+  teamId    String
+  status    String      @default("PENDING")
+  joinedAt  DateTime    @default(now())
+
+  user      User        @relation(fields: [userId], references: [id])
+  team      Team        @relation(fields: [teamId], references: [id])
+
+  @@id([userId, teamId])
+}
+
+model Match {
+  id                String              @id @default(uuid())
+  scheduledAt       DateTime
+  fieldId           String
+  homeTeamId        String
+  awayTeamId        String
+  refId             String?
+  homeScore         Int?
+  awayScore         Int?
+  status            MatchStatus         @default(SCHEDULED)
+  checklistDone     Boolean             @default(false)
+  streamLink        String?
+  weatherStatus     String?
+  seasonId          String
+
+  homeTeam          Team                @relation("Home", fields: [homeTeamId], references: [id])
+  awayTeam          Team                @relation("Away", fields: [awayTeamId], references: [id])
+  ref               User?               @relation("MatchRef", fields: [refId], references: [id])
+  subs              Sub[]
+  disciplinary      DisciplinaryAction[]
+  season            Season              @relation(fields: [seasonId], references: [id])
+}
+
+model Ledger {
+  id            String              @id @default(uuid())
+  userId        String
+  amount        Float
+  type          TransactionType
+  status        String              @default("PENDING")
+  year          Int
+  description   String?
+  matchId       String?
+  createdAt     DateTime            @default(now())
+
+  user          User                @relation(fields: [userId], references: [id])
+}
+
+model Sub {
+  id            String              @id @default(uuid())
+  matchId       String
+  playerId      String
+  type          String              @default("STANDARD")
+  approved      Boolean             @default(false)
+  createdAt     DateTime            @default(now())
+
+  match         Match               @relation(fields: [matchId], references: [id])
+  player        User                @relation(fields: [playerId], references: [id])
+}
+
+model DisciplinaryAction {
+  id            String              @id @default(uuid())
+  userId        String
+  matchId       String?
+  cardType      String
+  fineAmount    Float
+  isPaid        Boolean             @default(false)
+  isReleased    Boolean             @default(false)
+  suspensionGames Int
+  createdAt     DateTime            @default(now())
+
+  user          User                @relation(fields: [userId], references: [id])
+  match         Match?              @relation(fields: [matchId], references: [id])
+}
+
+model Business {
+  id            String              @id @default(uuid())
+  userId        String
+  name          String
+  category      String
+  discount      String?
+  logoUrl       String?
+  contactInfo   String
+
+  user          User                @relation(fields: [userId], references: [id])
+}
+
+model Location {
+  id            String              @id @default(uuid())
+  name          String
+  address       String
+  latitude      Float?
+  longitude     Float?
+
+  fields        Field[]
+}
+
+model Field {
+  id            String              @id @default(uuid())
+  locationId    String
+  name          String
+  qualityScore  Int
+  hasLights     Boolean
+
+  location      Location            @relation(fields: [locationId], references: [id])
+  maintenance   MaintenanceLog[]
+}
+
+model Season {
+  id            String              @id @default(uuid())
+  name          String
+  startDate     DateTime
+  endDate       DateTime?
+  isArchived    Boolean             @default(false)
+  scoringSystem String              @default("TRADITIONAL")
+  minRosterSize Int
+  maxRosterSize Int
+  subQuota      Int
+
+  teams         Team[]
+  matches       Match[]
+  divisions     Division[]
+  registrations Registration[]
+  pricingTiers  PricingTier[]
+  registrationForm RegistrationForm?
+}
+
+model Division {
+  id            String              @id @default(uuid())
+  name          String
+  level         Int
+  seasonId      String
+
+  teams         Team[]
+  season        Season              @relation(fields: [seasonId], references: [id])
+}
+
+model RefRating {
+  id            String              @id @default(uuid())
+  refId         String
+  raterId       String
+  rating        Int
+  comments      String?
+
+  ref           User                @relation("RefRatings", fields: [refId], references: [id])
+  rater         User                @relation("RaterRatings", fields: [raterId], references: [id])
+}
+
+model BackgroundCheck {
+  id            String              @id @default(uuid())
+  userId        String
+  provider      String
+  status        String
+  resultUrl     String?
+  expiresAt     DateTime?
+  createdAt     DateTime            @default(now())
+
+  user          User                @relation(fields: [userId], references: [id])
+}
+
+model VolunteerShift {
+  id            String              @id @default(uuid())
+  userId        String
+  eventId       String
+  role          String
+  hours         Float?
+  status        String              @default("ASSIGNED")
+  createdAt     DateTime            @default(now())
+
+  user          User                @relation(fields: [userId], references: [id])
+}
+
+model FundraisingCampaign {
+  id            String              @id @default(uuid())
+  name          String
+  goalAmount    Float
+  current       Float               @default(0)
+  description   String?
+  endDate       DateTime?
+  createdAt     DateTime            @default(now())
+}
+
+model MaintenanceLog {
+  id            String              @id @default(uuid())
+  fieldId       String
+  issue         String
+  status        String              @default("OPEN")
+  notes         String?
+  createdAt     DateTime            @default(now())
+
+  field         Field               @relation(fields: [fieldId], references: [id])
+}
+
+// ============ FEATURE 7: MERCHANDISE/STORE ============
+
+enum ProductCategory {
+  JERSEYS
+  APPAREL
+  EQUIPMENT
+  ACCESSORIES
+}
+
+model Product {
+  id            String              @id @default(uuid())
+  name          String
+  description   String?
+  category      ProductCategory
+  basePrice     Float
+  imageUrl      String?
+  sizes         String[]            // XS, S, M, L, XL, XXL
+  colors        String[]
+  stock         Int                 @default(100)
+  isActive      Boolean             @default(true)
+  isFeatured    Boolean             @default(false)
+  externalUrl   String?              // SquadLocker/Printful link
+  createdAt     DateTime            @default(now())
+
+  orderItems    OrderItem[]
+}
+
+model Order {
+  id            String              @id @default(uuid())
+  userId        String
+  status        String              @default("PENDING")
+  total         Float
+  shippingAddress String?
+  trackingNumber String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  user          User                @relation(fields: [userId], references: [id])
+  items         OrderItem[]
+}
+
+model OrderItem {
+  id            String              @id @default(uuid())
+  orderId       String
+  productId     String
+  quantity      Int
+  size          String?
+  color         String?
+  priceAtPurchase Float
+
+  order         Order               @relation(fields: [orderId], references: [id])
+  product       Product             @relation(fields: [productId], references: [id])
+}
+
+// ============ FEATURE 8: ANALYTICS ============
+
+model AnalyticsEvent {
+  id            String              @id @default(uuid())
+  eventType     String              // match_attendance, sub_request, donation, registration
+  userId        String?
+  teamId        String?
+  matchId       String?
+  metadata      Json?
+  createdAt     DateTime            @default(now())
+}
+
+// ============ FEATURE 9: SEASON REGISTRATION & INSURANCE TRACKING ============
+
+// Season Registration - tracks player signup per season
+model Registration {
+  id              String              @id @default(uuid())
+  userId          String
+  seasonId        String
+  status          String              @default("PENDING") // PENDING, APPROVED, REJECTED
+  rejectionReason String?             // Reason if rejected
+  paid            Boolean             @default(false)
+  paymentId       String?             // Stripe payment intent ID
+  amount          Float
+  insuranceStatus String              @default("PENDING") // PENDING, VALID, EXPIRED, REQUIRED
+  insurancePurchasedAt DateTime?
+  
+  // Waiver acceptance
+  waiverSignedAt   DateTime?          // When player signed the waiver
+  waiverIpAddress String?             // IP address when signed
+  
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  user            User                @relation(fields: [userId], references: [id])
+  season          Season              @relation(fields: [seasonId], references: [id])
+
+  @@unique([userId, seasonId]) // One registration per user per season
+}
+
+// Insurance Policy - 365-day annual tracking per PRD
+model InsurancePolicy {
+  id              String              @id @default(uuid())
+  userId          String
+  provider        String              @default("LEAGUE_PROVIDED")
+  policyNumber    String?
+  startDate       DateTime
+  endDate         DateTime            // 365 days from start
+  cost            Float               @default(50.00)
+  status          String              @default("ACTIVE") // ACTIVE, EXPIRED, CANCELLED
+  stripePaymentId String?
+  createdAt       DateTime            @default(now())
+
+  user            User                @relation(fields: [userId], references: [id])
+
+  @@index([userId, endDate]) // For expiry queries
+}
+
+// Tiered pricing per season (Early Bird → Regular → Late)
+model PricingTier {
+  id            String              @id @default(uuid())
+  seasonId      String
+  name          String              // "Early Bird", "Regular", "Late"
+  startDate     DateTime
+  endDate       DateTime
+  amount        Float
+  isActive      Boolean             @default(true)
+  createdAt     DateTime            @default(now())
+
+  season        Season              @relation(fields: [seasonId], references: [id])
+}
+
+// Chat Messages
+model Message {
+  id            String              @id @default(uuid())
+  channel       String              // global, division-X, team-X, user-userId
+  userId        String
+  content       String
+  isPinned      Boolean             @default(false)
+  isDeleted     Boolean             @default(false)
+  createdAt     DateTime            @default(now())
+
+  user          User                @relation(fields: [userId], references: [id])
+
+  @@index([channel, createdAt])
+}
+
+// Registration Form - Customizable form per season
+model RegistrationForm {
+  id                  String              @id @default(uuid())
+  seasonId            String              @unique
+  
+  // Registration settings
+  isEnabled           Boolean             @default(true)
+  requireInsurance    Boolean             @default(true)
+  
+  // Waiver settings
+  requireWaiver       Boolean             @default(false)
+  waiverText          String?             // Custom waiver/terms text
+  
+  // Pricing
+  baseFee             Float               @default(150.00)
+  earlyBirdFee        Float?              // Optional early bird discount
+  lateFee             Float?              // Optional late penalty
+  
+  // Custom fields (JSON)
+  customFields        Json                @default("[]")
+  
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  season              Season              @relation(fields: [seasonId], references: [id])
+}
+
+model DiscountCode {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  discountType    String    // PERCENTAGE, FIXED
+  discountValue   Float     // e.g., 10 for 10% or 10.00 for $10 off
+  maxUses         Int?      // null = unlimited
+  currentUses     Int       @default(0)
+  expiresAt       DateTime?
+  isActive        Boolean   @default(true)
+  description     String?
+  seasonId        String?   // null = all seasons
+  createdAt       DateTime  @default(now())
+}

@@ -1,0 +1,44 @@
+{
+  "name": "League OS - Adult Soccer League",
+  "short_name": "League OS",
+  "description": "Complete league management system for adult recreational soccer",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#00F5FF",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/images/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/images/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["sports", "games"],
+  "shortcuts": [
+    {
+      "name": "Schedule",
+      "url": "/schedule",
+      "description": "View match schedule"
+    },
+    {
+      "name": "Standings",
+      "url": "/standings",
+      "description": "View league standings"
+    },
+    {
+      "name": "My ID",
+      "url": "/dashboard/id",
+      "description": "View your digital player ID"
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
