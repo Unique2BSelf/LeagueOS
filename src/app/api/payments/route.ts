@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
 // Mock Stripe integration for demo purposes
@@ -6,28 +6,13 @@ import { prisma } from '@/lib/prisma';
 // Then import: import Stripe from 'stripe';
 // const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2024-12-18.acacia' });
 
-/*
- * STRIPE CONFIGURATION (for production):
- * 
- * 1. Install Stripe: npm install stripe
- * 2. Add to .env.local:
- *    STRIPE_SECRET_KEY=sk_test_...
- *    STRIPE_PUBLISHABLE_KEY=pk_test_...
- *    STRIPE_WEBHOOK_SECRET=whsec_...
- * 
- * 3. In production mode, replace mock functions below with real Stripe SDK calls:
- *    - stripe.paymentIntents.create() for payments
- *    - stripe.refunds.create() for refunds
- *    - stripe.paymentIntents.retrieve() to verify payment status
- */
-
 export interface PaymentRecord {
   id: string
   registrationId: string
   userId: string
   seasonId: string
   amount: number
-  method: 'CARD' | 'CASH' | 'VENMO'
+  method: 'CARD' | 'CASH' | 'VENMO' | 'APPLE_PAY'
   status: 'PENDING' | 'COMPLETED' | 'FAILED' | 'REFUNDED'
   stripePaymentId?: string
   venmoHandle?: string
@@ -38,10 +23,8 @@ export interface PaymentRecord {
   refundedAt?: Date
 }
 
-// In-memory store for demo (use database in production)
 const paymentsDb: Map<string, PaymentRecord> = new Map();
 
-// POST /api/payments - Create payment intent/checkout session
 export async function POST(request: NextRequest) {
   try {
     const userId = request.headers.get('x-user-id');
@@ -51,7 +34,6 @@ export async function POST(request: NextRequest) {
 
     const { registrationId, method = 'CARD' } = await request.json();
 
-    // Get registration
     const registration = await prisma.registration.findUnique({
       where: { id: registrationId },
       include: { season: true },
@@ -69,16 +51,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Already paid' }, { status: 400 });
     }
 
-    // For demo: create mock payment record
-    const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    // In production with real Stripe:
-    // const paymentIntent = await stripe.paymentIntents.create({
-    //   amount: Math.round(registration.amount * 100), // cents
-    //   currency: 'usd',
-    //   metadata: { registrationId, userId },
-    //   automatic_payment_methods: { enabled: true },
-    // });
+    const paymentId = `pay_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    const normalizedMethod = method as PaymentRecord['method'];
 
     const payment: PaymentRecord = {
       id: paymentId,
@@ -86,24 +60,23 @@ export async function POST(request: NextRequest) {
       userId,
       seasonId: registration.seasonId,
       amount: registration.amount,
-      method: method as 'CARD' | 'CASH' | 'VENMO',
+      method: normalizedMethod,
       status: 'PENDING',
-      stripePaymentId: method === 'CARD' ? `pi_mock_${Date.now()}` : undefined,
+      stripePaymentId: normalizedMethod === 'CARD' || normalizedMethod === 'APPLE_PAY' ? `pi_mock_${Date.now()}` : undefined,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
 
     paymentsDb.set(paymentId, payment);
 
-    // Return mock client secret for Stripe Elements
     return NextResponse.json({
       paymentId,
       amount: registration.amount,
-      clientSecret: method === 'CARD' ? `${paymentId}_secret_mock` : undefined,
-      method,
-      message: method === 'CARD' 
-        ? 'Demo mode: payment would be processed via Stripe' 
-        : `Payment method: ${method}. Awaiting admin confirmation.`,
+      clientSecret: normalizedMethod === 'CARD' || normalizedMethod === 'APPLE_PAY' ? `${paymentId}_secret_mock` : undefined,
+      method: normalizedMethod,
+      message: normalizedMethod === 'CARD' || normalizedMethod === 'APPLE_PAY'
+        ? 'Demo mode: payment would be processed via Stripe'
+        : `Payment method: ${normalizedMethod}. Awaiting admin confirmation.`,
     });
   } catch (error) {
     console.error('Error creating payment:', error);
@@ -111,7 +84,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET /api/payments - List payments (admin) or user's payments
 export async function GET(request: NextRequest) {
   try {
     const userId = request.headers.get('x-user-id');
@@ -119,7 +91,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Check if admin
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const isAdmin = user?.role === 'ADMIN' || user?.role === 'MODERATOR';
 
@@ -130,37 +101,39 @@ export async function GET(request: NextRequest) {
 
     let payments: PaymentRecord[] = Array.from(paymentsDb.values());
 
-    // Filter based on user role
     if (!isAdmin) {
-      payments = payments.filter(p => p.userId === userId);
+      payments = payments.filter((p) => p.userId === userId);
     }
 
-    // Apply additional filters
     if (registrationId) {
-      payments = payments.filter(p => p.registrationId === registrationId);
+      payments = payments.filter((p) => p.registrationId === registrationId);
     }
     if (seasonId) {
-      payments = payments.filter(p => p.seasonId === seasonId);
+      payments = payments.filter((p) => p.seasonId === seasonId);
     }
     if (status) {
-      payments = payments.filter(p => p.status === status);
+      payments = payments.filter((p) => p.status === status);
     }
 
-    // Enrich with registration/season data for admin view
     if (isAdmin) {
       const enrichedPayments = await Promise.all(
-        payments.map(async (p) => {
+        payments.map(async (payment) => {
           const registration = await prisma.registration.findUnique({
-            where: { id: p.registrationId },
+            where: { id: payment.registrationId },
             include: { user: { select: { id: true, fullName: true, email: true } }, season: true },
           });
-          return { ...p, registration: registration ? {
-            userName: registration.user.fullName,
-            userEmail: registration.user.email,
-            seasonName: registration.season.name,
-          } : null };
+
+          return {
+            ...payment,
+            registration: registration ? {
+              userName: registration.user.fullName,
+              userEmail: registration.user.email,
+              seasonName: registration.season.name,
+            } : null,
+          };
         })
       );
+
       return NextResponse.json(enrichedPayments);
     }
 
@@ -171,7 +144,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/payments/confirm - Confirm payment (for cash/Venmo or mock Stripe)
 export async function PUT(request: NextRequest) {
   try {
     const userId = request.headers.get('x-user-id');
@@ -179,10 +151,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Check admin role
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || (user.role !== 'ADMIN' && user.role !== 'MODERATOR')) {
-      return NextResponse.json({ error: 'Admin only' }, { status: 403 });
+    const actor = await prisma.user.findUnique({ where: { id: userId } });
+    if (!actor) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { paymentId, action, notes } = await request.json();
@@ -192,22 +163,33 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
     }
 
+    const isAdmin = actor.role === 'ADMIN' || actor.role === 'MODERATOR';
+    const isOwner = payment.userId === userId;
+
+    if (!isAdmin && !(isOwner && action === 'confirm')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     if (action === 'confirm') {
       payment.status = 'COMPLETED';
       payment.processedAt = new Date();
-      
-      // Update registration as paid
+
       await prisma.registration.update({
         where: { id: payment.registrationId },
-        data: { 
-          paid: true, 
+        data: {
+          paid: true,
           paymentId: payment.stripePaymentId || paymentId,
           status: 'APPROVED',
         },
       });
     } else if (action === 'fail') {
+      if (!isAdmin) {
+        return NextResponse.json({ error: 'Admin only' }, { status: 403 });
+      }
       payment.status = 'FAILED';
       payment.notes = notes;
+    } else {
+      return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     }
 
     payment.updatedAt = new Date();
@@ -220,7 +202,6 @@ export async function PUT(request: NextRequest) {
   }
 }
 
-// POST /api/payments/refund - Process refund
 export async function PATCH(request: NextRequest) {
   try {
     const userId = request.headers.get('x-user-id');
@@ -228,7 +209,6 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Check admin role
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user || user.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 });
@@ -245,23 +225,15 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Can only refund completed payments' }, { status: 400 });
     }
 
-    // In production with real Stripe:
-    // await stripe.refunds.create({
-    //   payment_intent: payment.stripePaymentId,
-    //   reason: 'requested_by_customer',
-    // });
-
-    // Update payment record
     payment.status = 'REFUNDED';
     payment.refundedAt = new Date();
     payment.notes = reason;
     payment.updatedAt = new Date();
     paymentsDb.set(paymentId, payment);
 
-    // Update registration as unpaid
     await prisma.registration.update({
       where: { id: payment.registrationId },
-      data: { paid: false, paymentId: null },
+      data: { paid: false, paymentId: null, status: 'PENDING' },
     });
 
     return NextResponse.json({
@@ -275,7 +247,6 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-// POST /api/payments/manual - Record manual payment (admin)
 export async function POST_MANUAL(request: NextRequest) {
   try {
     const userId = request.headers.get('x-user-id');
@@ -283,18 +254,13 @@ export async function POST_MANUAL(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Check admin role
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user || (user.role !== 'ADMIN' && user.role !== 'MODERATOR')) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 });
     }
 
     const { registrationId, method, amount, venmoHandle, notes } = await request.json();
-
-    // Verify registration exists
-    const registration = await prisma.registration.findUnique({
-      where: { id: registrationId },
-    });
+    const registration = await prisma.registration.findUnique({ where: { id: registrationId } });
 
     if (!registration) {
       return NextResponse.json({ error: 'Registration not found' }, { status: 404 });
@@ -304,9 +270,8 @@ export async function POST_MANUAL(request: NextRequest) {
       return NextResponse.json({ error: 'Registration already paid' }, { status: 400 });
     }
 
-    // Create manual payment record
-    const paymentId = `manual_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+    const paymentId = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+
     const payment: PaymentRecord = {
       id: paymentId,
       registrationId,
@@ -324,11 +289,10 @@ export async function POST_MANUAL(request: NextRequest) {
 
     paymentsDb.set(paymentId, payment);
 
-    // Update registration
     await prisma.registration.update({
       where: { id: registrationId },
-      data: { 
-        paid: true, 
+      data: {
+        paid: true,
         paymentId,
         status: 'APPROVED',
       },
@@ -344,3 +308,4 @@ export async function POST_MANUAL(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to record payment' }, { status: 500 });
   }
 }
+

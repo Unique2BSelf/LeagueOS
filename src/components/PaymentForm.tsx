@@ -1,7 +1,8 @@
-'use client'
+﻿'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { CreditCard, DollarSign, Check, Loader2, AlertCircle, Lock, Apple, X } from 'lucide-react'
+import { getAuthHeaders } from '@/lib/client-auth'
 
 interface PaymentFormProps {
   registrationId: string
@@ -15,39 +16,24 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
   const [method, setMethod] = useState<'CARD' | 'APPLE_PAY'>('CARD')
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [paymentId, setPaymentId] = useState<string | null>(null)
-  const [step, setStep] = useState<'select' | 'card' | 'processing' | 'success'>('select')
-
-  // Card form state (mock)
+  const [step, setStep] = useState<'card' | 'processing' | 'success'>('card')
   const [cardNumber, setCardNumber] = useState('')
   const [expiry, setExpiry] = useState('')
   const [cvc, setCvc] = useState('')
   const [name, setName] = useState('')
 
-  useEffect(() => {
-    // Check for Apple Pay availability (mock)
-    if (typeof window !== 'undefined' && (window as any).ApplePaySession) {
-      // Apple Pay available
-    }
-  }, [])
-
   const formatCardNumber = (value: string) => {
-    const v = value.replace(/\s+/g, '').replace(/[^0-9]/gi, '')
-    const matches = v.match(/\d{4,16}/g)
-    const match = (matches && matches[0]) || ''
-    const parts = []
-    for (let i = 0, len = match.length; i < len; i += 4) {
-      parts.push(match.substring(i, i + 4))
-    }
-    return parts.length ? parts.join(' ') : value
+    const digits = value.replace(/\s+/g, '').replace(/[^0-9]/g, '')
+    const parts = digits.match(/.{1,4}/g)
+    return parts ? parts.join(' ') : ''
   }
 
   const formatExpiry = (value: string) => {
-    const v = value.replace(/\s+/g, '').replace(/[^0-9]/gi, '')
-    if (v.length >= 2) {
-      return v.substring(0, 2) + '/' + v.substring(2, 4)
+    const digits = value.replace(/\D/g, '').slice(0, 4)
+    if (digits.length < 3) {
+      return digits
     }
-    return v
+    return `${digits.slice(0, 2)}/${digits.slice(2)}`
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -57,43 +43,40 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
     setStep('processing')
 
     try {
-      // Create payment intent
       const res = await fetch('/api/payments', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
         body: JSON.stringify({ registrationId, method }),
       })
 
       const data = await res.json()
-
       if (!res.ok) {
         throw new Error(data.error || 'Payment failed')
       }
 
-      // In production with real Stripe, you'd use:
-      // const { error: stripeError, paymentIntent } = await stripe.confirmCardPayment(data.clientSecret, {
-      //   payment_method: { card: elements.getElement(CardElement)! }
-      // })
+      await new Promise((resolve) => setTimeout(resolve, 1200))
 
-      // Mock: Simulate successful payment after delay
-      await new Promise(resolve => setTimeout(resolve, 2000))
-
-      // For demo, immediately confirm the payment
       const confirmRes = await fetch('/api/payments', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
         body: JSON.stringify({ paymentId: data.paymentId, action: 'confirm' }),
       })
 
+      const confirmed = await confirmRes.json()
       if (!confirmRes.ok) {
-        throw new Error('Failed to confirm payment')
+        throw new Error(confirmed.error || 'Failed to confirm payment')
       }
 
-      setPaymentId(data.paymentId)
       setStep('success')
-      setTimeout(() => onSuccess(data.paymentId), 1500)
-    } catch (err: any) {
-      setError(err.message)
+      setTimeout(() => onSuccess(data.paymentId), 1000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Payment failed')
       setStep('card')
     } finally {
       setProcessing(false)
@@ -131,7 +114,6 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
         </button>
       </div>
 
-      {/* Amount Display */}
       <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-4 mb-6">
         <div className="flex items-center justify-between">
           <div>
@@ -150,7 +132,6 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
       )}
 
       <form onSubmit={handleSubmit}>
-        {/* Payment Method Selection */}
         <div className="mb-4">
           <label className="text-white/70 text-sm mb-2 block">Payment Method</label>
           <div className="grid grid-cols-2 gap-3">
@@ -169,9 +150,11 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
             <button
               type="button"
               onClick={() => setMethod('APPLE_PAY')}
-              disabled
-              className="p-3 rounded-lg border border-white/20 text-white/40 flex items-center justify-center gap-2 cursor-not-allowed opacity-50"
-              title="Coming soon"
+              className={`p-3 rounded-lg border flex items-center justify-center gap-2 transition-all ${
+                method === 'APPLE_PAY'
+                  ? 'border-cyan-500 bg-cyan-500/10 text-cyan-400'
+                  : 'border-white/20 text-white/60 hover:border-white/40'
+              }`}
             >
               <Apple className="w-5 h-5" />
               Apple Pay
@@ -179,71 +162,66 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
           </div>
         </div>
 
-        {/* Card Details (Mock) */}
-        {method === 'CARD' && (
-          <div className="space-y-4">
-            <div>
-              <label className="text-white/70 text-sm mb-1 block">Cardholder Name</label>
+        <div className="space-y-4">
+          <div>
+            <label className="text-white/70 text-sm mb-1 block">Cardholder Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="John Doe"
+              className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-cyan-500"
+              required
+            />
+          </div>
+          <div>
+            <label className="text-white/70 text-sm mb-1 block">Card Number</label>
+            <div className="relative">
               <input
                 type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="John Doe"
+                value={cardNumber}
+                onChange={(e) => setCardNumber(formatCardNumber(e.target.value).slice(0, 19))}
+                placeholder="4242 4242 4242 4242"
+                maxLength={19}
+                className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-cyan-500 pr-12"
+                required
+              />
+              <CreditCard className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-white/70 text-sm mb-1 block">Expiry Date</label>
+              <input
+                type="text"
+                value={expiry}
+                onChange={(e) => setExpiry(formatExpiry(e.target.value))}
+                placeholder="MM/YY"
+                maxLength={5}
                 className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-cyan-500"
                 required
               />
             </div>
             <div>
-              <label className="text-white/70 text-sm mb-1 block">Card Number</label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={cardNumber}
-                  onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
-                  placeholder="4242 4242 4242 4242"
-                  maxLength={19}
-                  className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-cyan-500 pr-12"
-                  required
-                />
-                <CreditCard className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-white/70 text-sm mb-1 block">Expiry Date</label>
-                <input
-                  type="text"
-                  value={expiry}
-                  onChange={(e) => setExpiry(formatExpiry(e.target.value))}
-                  placeholder="MM/YY"
-                  maxLength={5}
-                  className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-cyan-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="text-white/70 text-sm mb-1 block">CVC</label>
-                <input
-                  type="text"
-                  value={cvc}
-                  onChange={(e) => setCvc(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  placeholder="123"
-                  maxLength={4}
-                  className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-cyan-500"
-                  required
-                />
-              </div>
+              <label className="text-white/70 text-sm mb-1 block">CVC</label>
+              <input
+                type="text"
+                value={cvc}
+                onChange={(e) => setCvc(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                placeholder="123"
+                maxLength={4}
+                className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-cyan-500"
+                required
+              />
             </div>
           </div>
-        )}
+        </div>
 
-        {/* Security Badge */}
         <div className="flex items-center justify-center gap-2 mt-6 text-white/40">
           <Lock className="w-4 h-4" />
           <span className="text-xs">Demo mode - no real charges</span>
         </div>
 
-        {/* Submit Button */}
         <button
           type="submit"
           disabled={processing}
@@ -263,7 +241,6 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
         </button>
       </form>
 
-      {/* Demo Notice */}
       <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
         <p className="text-yellow-300 text-xs text-center">
           <strong>Demo Mode:</strong> Use any card number. No real charges will be made.
@@ -272,3 +249,4 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
     </div>
   )
 }
+

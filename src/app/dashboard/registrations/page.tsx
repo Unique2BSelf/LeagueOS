@@ -1,10 +1,10 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { User, Calendar, DollarSign, Check, Loader2, CreditCard, AlertCircle, X } from 'lucide-react'
+import { User, Calendar, Check, Loader2, AlertCircle, X } from 'lucide-react'
 import PaymentForm from '@/components/PaymentForm'
+import { getAuthHeaders, getStoredUser, type StoredUser } from '@/lib/client-auth'
 
 interface Season {
   id: string
@@ -29,8 +29,7 @@ interface Registration {
 }
 
 export default function RegistrationsPage() {
-  const router = useRouter()
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<StoredUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [seasons, setSeasons] = useState<Season[]>([])
   const [registrations, setRegistrations] = useState<Registration[]>([])
@@ -40,113 +39,118 @@ export default function RegistrationsPage() {
   const [payingSeason, setPayingSeason] = useState<Season | null>(null)
 
   useEffect(() => {
-    const stored = localStorage.getItem('league_user')
-    if (stored) {
-      const userData = JSON.parse(stored)
-      setUser(userData)
-      fetchSeasons()
-      fetchRegistrations()
+    const storedUser = getStoredUser()
+    setUser(storedUser)
+
+    if (!storedUser) {
+      setLoading(false)
+      return
     }
-    setLoading(false)
+
+    Promise.all([fetchSeasons(), fetchRegistrations()]).finally(() => setLoading(false))
   }, [])
 
   const fetchSeasons = async () => {
-    try {
-      const res = await fetch('/api/seasons')
-      if (res.ok) {
-        const data = await res.json()
-        const activeSeasons = data.filter((s: any) => !s.isArchived).map((s: any) => ({
-          id: s.id,
-          name: s.name,
-          startDate: s.startDate,
-          endDate: s.endDate,
-          registrationFee: 150,
-          insuranceRequired: true,
-          status: 'OPEN',
-          spots: s.maxRosterSize - (s.teams || 0) * 10,
-          totalSpots: s.maxRosterSize,
-        }))
-        setSeasons(activeSeasons)
-      }
-    } catch (error) {
-      console.error('Failed to fetch seasons:', error)
+    const res = await fetch('/api/seasons')
+    if (!res.ok) {
+      return
     }
+
+    const data = await res.json()
+    const activeSeasons = data
+      .filter((season: any) => !season.isArchived)
+      .map((season: any) => ({
+        id: season.id,
+        name: season.name,
+        startDate: season.startDate,
+        endDate: season.endDate,
+        registrationFee: 150,
+        insuranceRequired: true,
+        status: 'OPEN',
+        spots: Math.max(0, season.maxRosterSize - Number(season.teams || 0) * 10),
+        totalSpots: season.maxRosterSize,
+      }))
+
+    setSeasons(activeSeasons)
   }
 
   const fetchRegistrations = async () => {
-    if (!user) return
-    try {
-      const res = await fetch('/api/registrations')
-      if (res.ok) {
-        const data = await res.json()
-        setRegistrations(data)
-      }
-    } catch (error) {
-      console.error('Failed to fetch registrations:', error)
+    const res = await fetch('/api/registrations', {
+      headers: getAuthHeaders(),
+    })
+
+    if (!res.ok) {
+      return
     }
+
+    const data = await res.json()
+    setRegistrations(data)
   }
 
   const handleRegister = async (seasonId: string) => {
-    if (!user) return
     setRegistering(seasonId)
 
     try {
       const res = await fetch('/api/registrations', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ seasonId }),
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ seasonId, waiverAgreed: true }),
       })
 
-      if (res.ok) {
-        const reg = await res.json()
-        const newReg = {
-          id: reg.id,
-          seasonId: reg.seasonId,
-          userId: user.id,
-          status: reg.status,
-          paid: reg.paid,
-          amount: reg.amount,
-          createdAt: reg.createdAt,
-        }
-        setRegistrations([...registrations, newReg])
-        
-        // If registration created but not paid, show payment modal
-        if (!reg.paid && reg.status !== 'APPROVED') {
-          const season = seasons.find(s => s.id === seasonId)
-          setPayingRegistration(newReg)
-          setPayingSeason(season || null)
-          setShowPaymentModal(true)
-        }
+      const reg = await res.json()
+      if (!res.ok) {
+        throw new Error(reg.error || 'Failed to register')
+      }
+
+      const newReg: Registration = {
+        id: reg.id,
+        seasonId: reg.seasonId,
+        userId: reg.userId,
+        status: reg.status,
+        paid: reg.paid,
+        amount: reg.amount,
+        createdAt: reg.createdAt,
+      }
+
+      setRegistrations((current) => [newReg, ...current])
+
+      if (!reg.paid) {
+        const season = seasons.find((item) => item.id === seasonId) || null
+        setPayingRegistration(newReg)
+        setPayingSeason(season)
+        setShowPaymentModal(true)
       }
     } catch (error) {
       console.error('Failed to register:', error)
+    } finally {
+      setRegistering(null)
     }
-
-    setRegistering(null)
   }
 
-  const handlePayNow = (reg: Registration) => {
-    const season = seasons.find(s => s.id === reg.seasonId)
-    setPayingRegistration(reg)
-    setPayingSeason(season || null)
+  const handlePayNow = (registration: Registration) => {
+    const season = seasons.find((item) => item.id === registration.seasonId) || null
+    setPayingRegistration(registration)
+    setPayingSeason(season)
     setShowPaymentModal(true)
   }
 
-  const handlePaymentSuccess = (paymentId: string) => {
-    // Update registration in local state
-    setRegistrations(registrations.map(r => 
-      r.id === payingRegistration?.id 
-        ? { ...r, paid: true, status: 'APPROVED' }
-        : r
-    ))
+  const handlePaymentSuccess = () => {
+    setRegistrations((current) =>
+      current.map((registration) =>
+        registration.id === payingRegistration?.id
+          ? { ...registration, paid: true, status: 'APPROVED' }
+          : registration
+      )
+    )
     setShowPaymentModal(false)
     setPayingRegistration(null)
     setPayingSeason(null)
   }
 
-  const getRegistrationStatus = (seasonId: string) => {
-    return registrations.find(r => r.seasonId === seasonId)
-  }
+  const getRegistrationStatus = (seasonId: string) => registrations.find((registration) => registration.seasonId === seasonId)
 
   if (!user) {
     return (
@@ -167,11 +171,10 @@ export default function RegistrationsPage() {
     )
   }
 
-  const openSeasons = seasons.filter(s => s.status === 'OPEN')
+  const openSeasons = seasons.filter((season) => season.status === 'OPEN')
 
   return (
     <div className="max-w-4xl mx-auto">
-      {/* Payment Modal */}
       {showPaymentModal && payingRegistration && payingSeason && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="w-full max-w-md">
@@ -194,43 +197,39 @@ export default function RegistrationsPage() {
         <h1 className="text-2xl font-bold text-white mb-2">Season Registration</h1>
         <p className="text-white/50 mb-6">Register for upcoming seasons and pay fees</p>
 
-        {/* Current Registrations */}
         {registrations.length > 0 && (
           <div className="mb-8">
             <h2 className="text-lg font-bold text-white mb-3">Your Registrations</h2>
             <div className="space-y-3">
-              {registrations.map((reg) => {
-                const season = seasons.find(s => s.id === reg.seasonId)
+              {registrations.map((registration) => {
+                const season = seasons.find((item) => item.id === registration.seasonId)
                 return (
-                  <div key={reg.id} className={`glass-card p-4 border-l-4 ${
-                    reg.paid && reg.status === 'APPROVED' ? 'border-green-500' :
-                    reg.status === 'REJECTED' ? 'border-red-500' : 'border-yellow-500'
+                  <div key={registration.id} className={`glass-card p-4 border-l-4 ${
+                    registration.paid && registration.status === 'APPROVED' ? 'border-green-500' :
+                    registration.status === 'REJECTED' ? 'border-red-500' : 'border-yellow-500'
                   }`}>
                     <div className="flex items-center justify-between">
                       <div>
                         <h3 className="text-white font-semibold">{season?.name || 'Unknown Season'}</h3>
                         <p className="text-white/50 text-sm">{season?.startDate} - {season?.endDate}</p>
-                        {reg.amount && (
-                          <p className="text-cyan-400 text-sm font-semibold mt-1">${reg.amount.toFixed(2)}</p>
+                        {registration.amount && (
+                          <p className="text-cyan-400 text-sm font-semibold mt-1">${registration.amount.toFixed(2)}</p>
                         )}
                       </div>
                       <div className="text-right">
                         <span className={`px-3 py-1 rounded-full text-sm ${
-                          reg.status === 'APPROVED' ? 'bg-green-500/20 text-green-400' :
-                          reg.status === 'REJECTED' ? 'bg-red-500/20 text-red-400' :
+                          registration.status === 'APPROVED' ? 'bg-green-500/20 text-green-400' :
+                          registration.status === 'REJECTED' ? 'bg-red-500/20 text-red-400' :
                           'bg-yellow-500/20 text-yellow-400'
                         }`}>
-                          {reg.status}
+                          {registration.status}
                         </span>
-                        {reg.status === 'PENDING' && !reg.paid && (
-                          <button 
-                            onClick={() => handlePayNow(reg)}
-                            className="block mt-2 btn-primary text-sm"
-                          >
+                        {registration.status === 'PENDING' && !registration.paid && (
+                          <button onClick={() => handlePayNow(registration)} className="block mt-2 btn-primary text-sm">
                             Pay Now
                           </button>
                         )}
-                        {reg.paid && (
+                        {registration.paid && (
                           <span className="block mt-2 text-green-400 text-sm flex items-center gap-1 justify-end">
                             <Check className="w-4 h-4" /> Paid
                           </span>
@@ -244,7 +243,6 @@ export default function RegistrationsPage() {
           </div>
         )}
 
-        {/* Available Seasons */}
         <h2 className="text-lg font-bold text-white mb-3">Available Seasons</h2>
         <div className="space-y-4">
           {openSeasons.map((season) => {
@@ -267,21 +265,19 @@ export default function RegistrationsPage() {
                   </div>
                 </div>
 
-                {/* Spots Available */}
                 <div className="mb-4">
                   <div className="flex justify-between text-sm mb-1">
                     <span className="text-white/70">Spots Available</span>
                     <span className="text-white">{season.spots}/{season.totalSpots}</span>
                   </div>
                   <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                    <div 
+                    <div
                       className={`h-full ${percentFull > 80 ? 'bg-red-500' : percentFull > 50 ? 'bg-yellow-500' : 'bg-green-500'}`}
                       style={{ width: `${percentFull}%` }}
                     />
                   </div>
                 </div>
 
-                {/* Requirements */}
                 <div className="flex gap-4 mb-4 text-sm">
                   {season.insuranceRequired && (
                     <span className="flex items-center gap-1 text-yellow-400">
@@ -291,7 +287,6 @@ export default function RegistrationsPage() {
                   )}
                 </div>
 
-                {/* Action */}
                 {existingReg ? (
                   <div className="text-center py-2 bg-white/5 rounded-lg">
                     {existingReg.status === 'PENDING' && !existingReg.paid ? (
@@ -324,7 +319,7 @@ export default function RegistrationsPage() {
                       </>
                     ) : (
                       <>
-                        <Check className="w-4 h-4" />
+                        <User className="w-4 h-4" />
                         Register for ${season.registrationFee}
                       </>
                     )}
@@ -345,3 +340,4 @@ export default function RegistrationsPage() {
     </div>
   )
 }
+

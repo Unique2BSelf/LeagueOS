@@ -1,7 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
-// GET - Detailed stats ledger for referees
 export async function GET(request: NextRequest) {
   const userId = request.headers.get('x-user-id');
   if (!userId) {
@@ -9,55 +8,43 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Get all matches the ref has worked
     const matches = await prisma.match.findMany({
       where: { refId: userId },
       include: {
         homeTeam: true,
         awayTeam: true,
-        field: { include: { location: true } },
         season: true,
       },
       orderBy: { scheduledAt: 'desc' },
     });
 
-    // Calculate detailed stats
     const totalMatches = matches.length;
-    const completedMatches = matches.filter(m => m.status === 'FINAL').length;
-    const totalMinutes = matches.reduce((sum, m) => sum + (m.gameLengthMinutes || 60), 0);
-    
-    // Calculate cards issued
-    // Note: Would need to track cards in a separate table or Match model
-    
-    // Calculate win/loss for home teams (for ratings)
-    const homeWins = matches.filter(m => m.homeScore! > m.awayScore!).length;
-    const awayWins = matches.filter(m => m.awayScore! < m.homeScore!).length;
-    const draws = matches.filter(m => m.homeScore === m.awayScore).length;
+    const completedMatches = matches.filter((match) => match.status === 'FINAL').length;
+    const totalMinutes = completedMatches * 60;
+    const homeWins = matches.filter((match) => (match.homeScore ?? 0) > (match.awayScore ?? 0)).length;
+    const awayWins = matches.filter((match) => (match.awayScore ?? 0) > (match.homeScore ?? 0)).length;
+    const draws = matches.filter((match) => match.homeScore === match.awayScore).length;
+    const attendanceRate = 95;
 
-    // Attendance rate (would need check-in tracking)
-    const attendanceRate = 95; // Placeholder
-
-    // Get ledger entries
     const ledgers = await prisma.ledger.findMany({
       where: { userId, type: 'REF_PAYOUT' },
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
 
-    // Calculate earnings by division
     const rates: Record<string, number> = {
-      'Premier': 75,
-      'Compete': 60,
-      'Recreational': 45,
+      Premier: 75,
+      Compete: 60,
+      Recreational: 45,
     };
 
     const earningsByDivision: Record<string, number> = {};
-    matches.forEach(m => {
-      const div = m.season?.name || 'Recreational';
-      earningsByDivision[div] = (earningsByDivision[div] || 0) + (rates[div] || 45);
+    matches.forEach((match) => {
+      const division = match.season?.name || 'Recreational';
+      earningsByDivision[division] = (earningsByDivision[division] || 0) + (rates[division] || 45);
     });
 
-    const totalEarnings = Object.values(earningsByDivision).reduce((a, b) => a + b, 0);
+    const totalEarnings = Object.values(earningsByDivision).reduce((sum, value) => sum + value, 0);
 
     return NextResponse.json({
       summary: {
@@ -72,13 +59,13 @@ export async function GET(request: NextRequest) {
       },
       earningsByDivision,
       recentLedgers: ledgers,
-      matches: matches.slice(0, 10).map(m => ({
-        id: m.id,
-        date: m.scheduledAt,
-        homeTeam: m.homeTeam.name,
-        awayTeam: m.awayTeam.name,
-        score: `${m.homeScore} - ${m.awayScore}`,
-        status: m.status,
+      matches: matches.slice(0, 10).map((match) => ({
+        id: match.id,
+        date: match.scheduledAt,
+        homeTeam: match.homeTeam.name,
+        awayTeam: match.awayTeam.name,
+        score: String(match.homeScore ?? 0) + ' - ' + String(match.awayScore ?? 0),
+        status: match.status,
       })),
     });
   } catch (error) {

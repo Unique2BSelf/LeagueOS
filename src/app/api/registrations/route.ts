@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
 // Calculate pro-rated fee
@@ -154,3 +154,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to create registration' }, { status: 500 });
   }
 }
+
+

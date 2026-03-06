@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ClientNav from "@/components/ClientNav";
+import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -24,15 +25,6 @@ export const metadata: Metadata = {
   },
 };
 
-// Register service worker for PWA
-if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {
-      // Service worker registration failed
-    });
-  });
-}
-
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -43,6 +35,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen gradient-mesh`}
       >
+        <ServiceWorkerRegistration />
         <ClientNav />
         <main className="pt-16">
           {children}
@@ -51,3 +44,5 @@ export default function RootLayout({
     </html>
   );
 }
+
+

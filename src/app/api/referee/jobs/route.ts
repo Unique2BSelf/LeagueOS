@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    // Get upcoming games that don't have a referee assigned
     const games = await prisma.match.findMany({
       where: {
         refId: null,
@@ -13,7 +12,6 @@ export async function GET(request: NextRequest) {
       include: {
         homeTeam: true,
         awayTeam: true,
-        field: { include: { location: true } },
         season: true,
       },
       orderBy: { scheduledAt: 'asc' },
@@ -21,17 +19,17 @@ export async function GET(request: NextRequest) {
     });
 
     const rates: Record<string, number> = {
-      'Premier': 75,
-      'Compete': 60,
-      'Recreational': 45,
+      Premier: 75,
+      Compete: 60,
+      Recreational: 45,
     };
 
-    const jobs = games.map(game => ({
+    const jobs = games.map((game) => ({
       id: game.id,
       homeTeam: game.homeTeam.name,
       awayTeam: game.awayTeam.name,
       scheduledAt: game.scheduledAt.toISOString(),
-      field: game.field?.name || "TBD",
+      field: game.fieldId || 'TBD',
       division: game.season?.name || 'Recreational',
       pay: rates[game.season?.name || 'Recreational'] || 45,
     }));
@@ -51,14 +49,11 @@ export async function POST(request: NextRequest) {
 
   try {
     const { matchId } = await request.json();
-
-    // Verify user is a referee
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user || (user.role !== 'REF' && user.role !== 'ADMIN')) {
       return NextResponse.json({ error: 'Must be a referee to claim games' }, { status: 403 });
     }
 
-    // Assign referee to match
     const match = await prisma.match.update({
       where: { id: matchId },
       data: { refId: userId, status: 'SCHEDULED' },

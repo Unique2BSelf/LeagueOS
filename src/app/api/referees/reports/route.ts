@@ -11,12 +11,12 @@ export async function GET(request: NextRequest) {
   try {
     const reports = await prisma.match.findMany({
       where: { refId },
-      include: { homeTeam: true, awayTeam: true, field: { include: { location: true } }, season: true },
+      include: { homeTeam: true, awayTeam: true, season: true },
       orderBy: { scheduledAt: 'desc' },
       take: 50,
     });
     return NextResponse.json(reports);
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to fetch' }, { status: 500 });
   }
 }
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { matchId, homeScore, awayScore, yellowCards, redCards, notes } = body;
+    const { matchId, homeScore, awayScore } = body;
 
     const match = await prisma.match.findUnique({ where: { id: matchId } });
     if (!match) return NextResponse.json({ error: 'Match not found' }, { status: 404 });
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ success: true, match: updated });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to submit' }, { status: 500 });
   }
 }
