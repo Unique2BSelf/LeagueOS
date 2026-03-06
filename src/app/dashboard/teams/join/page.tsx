@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useEffect, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Users, ArrowRight, Check, Loader2, Copy, QrCode } from 'lucide-react'
+import { ArrowRight, Check, Loader2 } from 'lucide-react'
+import { useSessionUser } from '@/hooks/use-session-user'
 
 interface Team {
   id: string
@@ -17,9 +18,8 @@ interface Team {
 }
 
 function JoinTeamContent() {
-  const router = useRouter()
   const searchParams = useSearchParams()
-  const [user, setUser] = useState<any>(null)
+  const { user, loading: sessionLoading } = useSessionUser()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -29,10 +29,6 @@ function JoinTeamContent() {
   const [mode, setMode] = useState<'code' | 'browse'>('code')
 
   useEffect(() => {
-    const stored = localStorage.getItem('league_user')
-    if (stored) {
-      setUser(JSON.parse(stored))
-    }
     fetchTeams()
   }, [])
 
@@ -40,7 +36,7 @@ function JoinTeamContent() {
     try {
       const res = await fetch('/api/teams')
       const data = await res.json()
-      setTeams(data.slice(0, 10).map((t: any, i: number) => ({
+      setTeams((Array.isArray(data) ? data : []).slice(0, 10).map((t: any, i: number) => ({
         id: t.id,
         name: t.name,
         division: 'Open',
@@ -48,15 +44,16 @@ function JoinTeamContent() {
         secondaryColor: t.secondaryColor || '#FFFFFF',
         captainName: 'Captain',
         playersCount: 8 + i,
-        openSlots: 5 - i,
+        openSlots: Math.max(0, 5 - i),
       })))
-    } catch (err) {
+    } catch {
       console.error('Failed to fetch teams')
     }
   }
 
-  const lookupTeam = async () => {
-    if (!inviteCode.trim()) {
+  const lookupTeam = async (overrideCode?: string) => {
+    const codeToUse = (overrideCode || inviteCode).trim()
+    if (!codeToUse) {
       setError('Please enter an invite code')
       return
     }
@@ -66,7 +63,7 @@ function JoinTeamContent() {
     setTeam(null)
 
     try {
-      const res = await fetch(`/api/teams/${inviteCode}`)
+      const res = await fetch(`/api/teams/${codeToUse}`)
       
       if (res.ok) {
         const data = await res.json()
@@ -83,7 +80,7 @@ function JoinTeamContent() {
       } else {
         setError('Invalid invite code. Please check and try again.')
       }
-    } catch (err) {
+    } catch {
       setError('Failed to lookup team. Please try again.')
     } finally {
       setLoading(false)
@@ -100,10 +97,8 @@ function JoinTeamContent() {
       const res = await fetch('/api/teams/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.id,
-          teamId: team.id,
-        }),
+        credentials: 'include',
+        body: JSON.stringify({ teamId: team.id }),
       })
 
       if (res.ok) {
@@ -114,7 +109,7 @@ function JoinTeamContent() {
         const data = await res.json()
         setError(data.error || 'Failed to send request')
       }
-    } catch (err) {
+    } catch {
       setError('Failed to send request')
     } finally {
       setLoading(false)
@@ -127,7 +122,15 @@ function JoinTeamContent() {
       return
     }
     setInviteCode(teamId)
-    lookupTeam()
+    lookupTeam(teamId)
+  }
+
+  if (sessionLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="animate-spin text-cyan-400" />
+      </div>
+    )
   }
 
   if (!user) {
@@ -185,7 +188,7 @@ function JoinTeamContent() {
                 placeholder="Enter invite code (e.g., TEAM-ABC123)"
               />
               <button
-                onClick={lookupTeam}
+                onClick={() => lookupTeam()}
                 disabled={loading}
                 className="btn-primary px-6"
               >
@@ -205,7 +208,7 @@ function JoinTeamContent() {
                     </div>
                     <div>
                       <p className="text-white font-semibold text-lg">{team.name}</p>
-                      <p className="text-white/50 text-sm">{team.division} • {team.captainName}</p>
+                      <p className="text-white/50 text-sm">{team.division} | {team.captainName}</p>
                     </div>
                   </div>
                   <div className="text-right">

@@ -1,9 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { AlertTriangle, Check, X, DollarSign, User, Calendar, Gavel, Loader2 } from 'lucide-react'
+import { AlertTriangle, Check, DollarSign, Calendar, Gavel, Loader2 } from 'lucide-react'
+import { useSessionUser } from '@/hooks/use-session-user'
 
 interface DisciplinaryAction {
   id: string
@@ -20,30 +19,21 @@ interface DisciplinaryAction {
 }
 
 export default function DisciplinaryPage() {
-  const router = useRouter()
-  const [user, setUser] = useState<any>(null)
+  const { user, loading: sessionLoading } = useSessionUser()
   const [actions, setActions] = useState<DisciplinaryAction[]>([])
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<string | null>(null)
 
   useEffect(() => {
-    const stored = localStorage.getItem('league_user')
-    if (stored) {
-      const userData = JSON.parse(stored)
-      setUser(userData)
-      
-      // Check if admin
-      if (userData.role !== 'ADMIN' && userData.role !== 'MODERATOR') {
-        // Redirect or show error
-      }
-      
+    if (user && (user.role === 'ADMIN' || user.role === 'MODERATOR')) {
       fetchActions()
     }
-    setLoading(false)
-  }, [])
+    if (!sessionLoading) {
+      setLoading(false)
+    }
+  }, [user, sessionLoading])
 
   const fetchActions = async () => {
-    // Mock disciplinary actions
     setActions([
       { id: 'da-1', userId: 'player-1', userName: 'John Smith', matchId: 'match-101', matchName: 'FC United vs City Kickers', cardType: 'RED', fineAmount: 50, isPaid: false, isReleased: false, suspensionGames: 1, createdAt: '2026-03-01T10:00:00Z' },
       { id: 'da-2', userId: 'player-2', userName: 'Mike Johnson', matchId: 'match-102', matchName: 'Thunder FC vs Wolf Pack', cardType: 'YELLOW_2', fineAmount: 25, isPaid: true, isReleased: false, suspensionGames: 0, createdAt: '2026-02-28T14:00:00Z' },
@@ -51,48 +41,37 @@ export default function DisciplinaryPage() {
     ])
   }
 
-  const updateStatus = async (actionId: string, field: string, value: boolean) => {
-    setProcessing(actionId)
-    
-    // Update local state
-    setActions(actions.map(a => 
-      a.id === actionId ? { ...a, } : a
-    ))
-    
-    // In production: call API
-    // await fetch('/ [field]: valueapi/disciplinary', { method: 'PATCH', ... })
-    
-    setProcessing(null)
-  }
-
   const processPayment = async (actionId: string) => {
     setProcessing(actionId)
-    
-    // Simulate payment processing
     setTimeout(() => {
-      setActions(actions.map(a => 
-        a.id === actionId ? { ...a, isPaid: true } : a
-      ))
+      setActions((current) => current.map((action) => action.id === actionId ? { ...action, isPaid: true } : action))
       setProcessing(null)
     }, 1000)
   }
 
   const releasePlayer = async (actionId: string) => {
     setProcessing(actionId)
-    
-    // Simulate release
     setTimeout(() => {
-      setActions(actions.map(a => 
-        a.id === actionId ? { ...a, isReleased: true } : a
-      ))
+      setActions((current) => current.map((action) => action.id === actionId ? { ...action, isReleased: true } : action))
       setProcessing(null)
     }, 1000)
   }
 
-  if (loading) {
+  if (sessionLoading || loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
+      </div>
+    )
+  }
+
+  if (!user || (user.role !== 'ADMIN' && user.role !== 'MODERATOR')) {
+    return (
+      <div className="max-w-3xl mx-auto">
+        <div className="glass-card p-8 text-center">
+          <AlertTriangle className="w-12 h-12 text-yellow-400 mx-auto mb-4" />
+          <p className="text-white">Moderator access required.</p>
+        </div>
       </div>
     )
   }
@@ -106,7 +85,6 @@ export default function DisciplinaryPage() {
         <h1 className="text-2xl font-bold text-white mb-2">Disciplinary Actions</h1>
         <p className="text-white/50 mb-6">Review red cards and manage fine payments</p>
 
-        {/* Stats */}
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="glass-card p-4 text-center">
             <p className="text-2xl font-bold text-red-400">{actions.length}</p>
@@ -122,7 +100,6 @@ export default function DisciplinaryPage() {
           </div>
         </div>
 
-        {/* Actions List */}
         <div className="space-y-4">
           {actions.map((action) => (
             <div 
@@ -180,7 +157,6 @@ export default function DisciplinaryPage() {
                 </div>
                 
                 <div className="flex flex-col gap-2">
-                  {/* Status badges */}
                   <div className="flex gap-1">
                     <span className={`px-2 py-1 rounded text-xs ${
                       action.isPaid 
@@ -198,7 +174,6 @@ export default function DisciplinaryPage() {
                     </span>
                   </div>
                   
-                  {/* Actions */}
                   {!action.isPaid && (
                     <button
                       onClick={() => processPayment(action.id)}
@@ -241,7 +216,6 @@ export default function DisciplinaryPage() {
           </div>
         )}
 
-        {/* Info */}
         <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
           <p className="text-blue-300 text-sm">
             <strong>How it works:</strong> When a referee issues a red card, a disciplinary action is created with an automatic fine. 

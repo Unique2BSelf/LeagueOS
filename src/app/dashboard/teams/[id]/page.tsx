@@ -1,9 +1,10 @@
-﻿'use client'
+'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter, useParams } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { Users, Copy, RefreshCw, Check, Loader2, AlertCircle, ArrowLeft, Settings, Shield } from 'lucide-react'
+import { Users, Copy, RefreshCw, Check, Loader2, AlertCircle, ArrowLeft, Shield } from 'lucide-react'
+import { useSessionUser } from '@/hooks/use-session-user'
 
 interface Team {
   id: string
@@ -33,11 +34,9 @@ interface Player {
 }
 
 export default function TeamDashboardPage() {
-  const router = useRouter()
   const params = useParams()
   const teamId = params.id as string
-  
-  const [user, setUser] = useState<any>(null)
+  const { user, loading: sessionLoading } = useSessionUser()
   const [team, setTeam] = useState<Team | null>(null)
   const [players, setPlayers] = useState<Player[]>([])
   const [loading, setLoading] = useState(true)
@@ -47,23 +46,19 @@ export default function TeamDashboardPage() {
   const [isCaptain, setIsCaptain] = useState(false)
 
   useEffect(() => {
-    const stored = localStorage.getItem('league_user')
-    if (stored) {
-      const userData = JSON.parse(stored)
-      setUser(userData)
-      fetchTeamData(teamId, userData.id)
-    } else {
+    if (user) {
+      fetchTeamData(teamId, user.id)
+    } else if (!sessionLoading) {
       setLoading(false)
       setError('Please log in to view this page')
     }
-  }, [teamId])
+  }, [teamId, user, sessionLoading])
 
   const fetchTeamData = async (id: string, userId: string) => {
     setLoading(true)
     setError('')
     
     try {
-      // Fetch team details
       const teamRes = await fetch(`/api/teams/${id}`)
       if (!teamRes.ok) {
         setError('Team not found')
@@ -73,17 +68,14 @@ export default function TeamDashboardPage() {
       
       const teamData = await teamRes.json()
       setTeam(teamData)
-      
-      // Check if user is captain
       setIsCaptain(teamData.captainId === userId)
       
-      // Fetch players
       const playersRes = await fetch(`/api/teams/${id}/players`)
       if (playersRes.ok) {
         const playersData = await playersRes.json()
         setPlayers(playersData)
       }
-    } catch (err) {
+    } catch {
       setError('Failed to load team data')
     } finally {
       setLoading(false)
@@ -97,7 +89,7 @@ export default function TeamDashboardPage() {
     try {
       const res = await fetch(`/api/teams/${teamId}/invite`, {
         method: 'POST',
-        headers: {},
+        credentials: 'include',
       })
       
       if (res.ok) {
@@ -107,7 +99,7 @@ export default function TeamDashboardPage() {
         const data = await res.json()
         setError(data.error || 'Failed to generate invite code')
       }
-    } catch (err) {
+    } catch {
       setError('Failed to generate invite code')
     } finally {
       setInviteLoading(false)
@@ -121,7 +113,7 @@ export default function TeamDashboardPage() {
     try {
       const res = await fetch(`/api/teams/${teamId}/invite`, {
         method: 'DELETE',
-        headers: {},
+        credentials: 'include',
       })
       
       if (res.ok) {
@@ -130,7 +122,7 @@ export default function TeamDashboardPage() {
         const data = await res.json()
         setError(data.error || 'Failed to revoke invite code')
       }
-    } catch (err) {
+    } catch {
       setError('Failed to revoke invite code')
     } finally {
       setInviteLoading(false)
@@ -139,7 +131,6 @@ export default function TeamDashboardPage() {
 
   const copyInviteLink = () => {
     if (!team?.inviteCode) return
-    
     const link = `${window.location.origin}/teams/join/${team.inviteCode}`
     navigator.clipboard.writeText(link)
     setCopied(true)
@@ -148,7 +139,7 @@ export default function TeamDashboardPage() {
 
   const isInviteValid = team?.inviteCode && team?.inviteCodeExpiry && new Date(team.inviteCodeExpiry) > new Date()
 
-  if (loading) {
+  if (sessionLoading || loading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
@@ -173,7 +164,6 @@ export default function TeamDashboardPage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      {/* Header */}
       <div className="mb-6">
         <Link href="/teams" className="inline-flex items-center gap-2 text-white/50 hover:text-white mb-4">
           <ArrowLeft className="w-4 h-4" />
@@ -189,7 +179,7 @@ export default function TeamDashboardPage() {
           </div>
           <div>
             <h1 className="text-3xl font-bold text-white">{team?.name}</h1>
-            <p className="text-white/50">{team?.division?.name || 'Open Division'} â€¢ {team?.season?.name || 'Current Season'}</p>
+            <p className="text-white/50">{team?.division?.name || 'Open Division'} | {team?.season?.name || 'Current Season'}</p>
           </div>
         </div>
       </div>
@@ -200,7 +190,6 @@ export default function TeamDashboardPage() {
         </div>
       )}
 
-      {/* Invite Players Section - Only show to captain */}
       {(isCaptain || user?.role === 'ADMIN') && (
         <div className="glass-card p-6 mb-6">
           <div className="flex items-center gap-2 mb-4">
@@ -266,7 +255,6 @@ export default function TeamDashboardPage() {
         </div>
       )}
 
-      {/* Team Roster */}
       <div className="glass-card p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -304,7 +292,6 @@ export default function TeamDashboardPage() {
         )}
       </div>
 
-      {/* Team Info */}
       <div className="glass-card p-6 mt-6">
         <div className="flex items-center gap-2 mb-4">
           <Shield className="w-5 h-5 text-cyan-400" />
@@ -325,4 +312,3 @@ export default function TeamDashboardPage() {
     </div>
   )
 }
-

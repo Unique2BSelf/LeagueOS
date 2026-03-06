@@ -1,9 +1,10 @@
-﻿'use client'
+'use client'
 
 import { useState, useEffect, Suspense } from 'react'
-import { useRouter, useParams } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { Users, ArrowRight, Check, Loader2, Shield, AlertCircle } from 'lucide-react'
+import { ArrowRight, Check, Loader2, Shield, AlertCircle } from 'lucide-react'
+import { useSessionUser } from '@/hooks/use-session-user'
 
 interface TeamInfo {
   id: string
@@ -15,11 +16,9 @@ interface TeamInfo {
 }
 
 function JoinWithCodeContent() {
-  const router = useRouter()
   const params = useParams()
   const code = params.code as string
-  
-  const [user, setUser] = useState<any>(null)
+  const { user, loading: sessionLoading } = useSessionUser()
   const [loading, setLoading] = useState(true)
   const [joining, setJoining] = useState(false)
   const [error, setError] = useState('')
@@ -28,27 +27,20 @@ function JoinWithCodeContent() {
   const [alreadyOnTeam, setAlreadyOnTeam] = useState(false)
 
   useEffect(() => {
-    const stored = localStorage.getItem('league_user')
-    if (stored) {
-      setUser(JSON.parse(stored))
-    }
     validateInviteCode()
-  }, [code])
+  }, [code, user?.id])
 
   const validateInviteCode = async () => {
     setLoading(true)
     setError('')
 
     try {
-      // Try the new API first
       const res = await fetch(`/api/teams/invite?code=${code}`)
       
       if (res.ok) {
         const data = await res.json()
         if (data.valid && data.team) {
           setTeam(data.team)
-          
-          // Check if user is already on this team
           if (user) {
             checkTeamMembership(data.team.id)
           }
@@ -58,7 +50,7 @@ function JoinWithCodeContent() {
       } else {
         setError('Invalid or expired invite code. Please check the link and try again.')
       }
-    } catch (err) {
+    } catch {
       setError('Failed to validate invite code. Please try again.')
     } finally {
       setLoading(false)
@@ -73,11 +65,9 @@ function JoinWithCodeContent() {
       if (res.ok) {
         const players = await res.json()
         const isMember = players.some((p: any) => p.userId === user.id)
-        if (isMember) {
-          setAlreadyOnTeam(true)
-        }
+        setAlreadyOnTeam(isMember)
       }
-    } catch (err) {
+    } catch {
       console.error('Failed to check team membership')
     }
   }
@@ -89,11 +79,12 @@ function JoinWithCodeContent() {
     setError('')
 
     try {
-      const res = await fetch('/api/teams/invite/join', {
+      const res = await fetch('/api/teams/invite', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({
           inviteCode: code,
         }),
@@ -104,20 +95,17 @@ function JoinWithCodeContent() {
       if (res.ok) {
         setSuccess(`Welcome to ${team.name}! You've successfully joined the team.`)
         setTeam(null)
-        
-        // Update local storage
-        localStorage.setItem('league_user', JSON.stringify({ ...user, teamId: team.id }))
       } else {
         setError(data.error || 'Failed to join team')
       }
-    } catch (err) {
+    } catch {
       setError('Failed to join team')
     } finally {
       setJoining(false)
     }
   }
 
-  if (loading) {
+  if (sessionLoading || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -181,7 +169,7 @@ function JoinWithCodeContent() {
               {team?.name?.slice(0, 2).toUpperCase() || 'TM'}
             </div>
             <h1 className="text-2xl font-bold text-white">{team?.name}</h1>
-            <p className="text-white/50">{team?.division} â€¢ {team?.season}</p>
+            <p className="text-white/50">{team?.division} | {team?.season}</p>
           </div>
 
           <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-4 mb-6">
@@ -253,4 +241,3 @@ export default function JoinTeamPage() {
     </Suspense>
   )
 }
-

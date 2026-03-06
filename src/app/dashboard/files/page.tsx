@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import Link from 'next/link'
 import { FolderOpen, Upload, File, FileText, Image, Download, Trash2, Share2, Search, Grid, List } from 'lucide-react'
+import { useSessionUser } from '@/hooks/use-session-user'
 
 interface FileItem {
   id: string
@@ -25,21 +25,11 @@ const mockFiles: FileItem[] = [
 ]
 
 export default function FilesPage() {
-  const router = useRouter()
-  const [user, setUser] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
+  const { user, loading } = useSessionUser()
   const [files, setFiles] = useState<FileItem[]>(mockFiles)
   const [view, setView] = useState<'grid' | 'list'>('list')
   const [search, setSearch] = useState('')
   const [uploading, setUploading] = useState(false)
-
-  useEffect(() => {
-    const stored = localStorage.getItem('league_user')
-    if (stored) {
-      setUser(JSON.parse(stored))
-    }
-    setLoading(false)
-  }, [])
 
   const getFileIcon = (type: string) => {
     switch (type) {
@@ -63,6 +53,14 @@ export default function FilesPage() {
     setFiles(files.filter(f => f.id !== id))
   }
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -70,14 +68,6 @@ export default function FilesPage() {
           <p className="text-white mb-4">Please log in to manage files</p>
           <Link href="/login" className="btn-primary">Login</Link>
         </div>
-      </div>
-    )
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
@@ -106,7 +96,6 @@ export default function FilesPage() {
           </div>
         </div>
 
-        {/* Search & View Toggle */}
         <div className="flex items-center justify-between mb-6">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
@@ -134,7 +123,6 @@ export default function FilesPage() {
           </div>
         </div>
 
-        {/* Files */}
         {view === 'list' ? (
           <div className="space-y-2">
             {filteredFiles.map((file) => (
@@ -143,7 +131,7 @@ export default function FilesPage() {
                 <div className="flex-1">
                   <p className="text-white font-medium">{file.name}</p>
                   <p className="text-white/40 text-xs">
-                    {file.size} • {file.uploadedAt} • by {file.uploadedBy}
+                    {file.size} | {file.uploadedAt} | by {file.uploadedBy}
                   </p>
                 </div>
                 <div className="flex gap-1">

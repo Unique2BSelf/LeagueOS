@@ -1,18 +1,9 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Shield, CreditCard, AlertCircle, CheckCircle, Clock, WifiOff } from 'lucide-react';
+import { Shield, CreditCard, AlertCircle, CheckCircle, Clock, WifiOff, ScanLine } from 'lucide-react';
 import QRCode from 'qrcode';
 import { getStoredUser, syncStoredUser } from '@/lib/client-auth';
-
-function generateToken(userId: string): string {
-  const payload = {
-    userId,
-    timestamp: Date.now(),
-    nonce: Math.random().toString(36).slice(2, 11),
-  };
-  return btoa(JSON.stringify(payload));
-}
 
 interface User {
   id: string;
@@ -60,13 +51,14 @@ export default function DigitalIDPage() {
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL);
   const [isOffline, setIsOffline] = useState(false);
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
+  const [refreshError, setRefreshError] = useState('');
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     async function fetchUser() {
       try {
         await syncStoredUser();
-        const res = await fetch('/api/users/me', { cache: 'no-store' });
+        const res = await fetch('/api/users/me', { cache: 'no-store', credentials: 'include' });
         if (res.ok) {
           const data = await res.json();
           setUser(data);
@@ -92,17 +84,27 @@ export default function DigitalIDPage() {
   const generateQR = async () => {
     if (!user) return;
     try {
-      const token = generateToken(user.id);
-      const payload = JSON.stringify({ userId: user.id, token, timestamp: Date.now() });
-      const url = await QRCode.toDataURL(payload, {
+      const response = await fetch('/api/id/token', {
+        cache: 'no-store',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('Unable to refresh signed ID token');
+      }
+
+      const data = await response.json();
+      const url = await QRCode.toDataURL(data.token, {
         width: 200,
         margin: 2,
         color: { dark: isLocked ? '#EF4444' : '#00F5FF', light: '#121212' },
       });
       setQrCodeUrl(url);
       setCountdown(REFRESH_INTERVAL);
+      setRefreshError('');
     } catch (err) {
       console.error('QR generation failed:', err);
+      setRefreshError('Unable to refresh signed QR. Reconnect and try again.');
     }
   };
 
@@ -191,6 +193,12 @@ export default function DigitalIDPage() {
           </div>
         </div>
 
+        {refreshError && (
+          <div className="mb-4 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-300">
+            {refreshError}
+          </div>
+        )}
+
         <div className="space-y-3">
           <div className="flex items-center gap-3"><Shield size={18} className={user.isInsured ? 'text-green-400' : 'text-red-400'} /><div><p className="text-xs text-secondary">Insurance</p><p className={user.isInsured ? 'text-green-400' : 'text-red-400'}>{insuranceStatus}</p></div></div>
           <div className="flex items-center gap-3">{user.backgroundCheckStatus === 'CLEAR' ? <CheckCircle size={18} className="text-green-400" /> : <AlertCircle size={18} className="text-yellow-400" />}<div><p className="text-xs text-secondary">Background Check</p><p className={user.backgroundCheckStatus === 'CLEAR' ? 'text-green-400' : 'text-yellow-400'}>{user.backgroundCheckStatus}</p></div></div>
@@ -202,9 +210,13 @@ export default function DigitalIDPage() {
         <h3 className="font-semibold mb-2">How to Use</h3>
         <ul className="text-sm text-secondary space-y-1">
           <li>Show this QR code at check-in</li>
-          <li>QR refreshes every 60 seconds for security</li>
-          <li>Valid only when status shows Active</li>
+          <li>QR refreshes every 60 seconds using a signed server token</li>
+          <li>Refs and admins can validate it at the scanner screen</li>
         </ul>
+        <a href="/dashboard/scan" className="mt-4 inline-flex items-center gap-2 text-sm text-[#00F5FF] hover:text-white">
+          <ScanLine size={14} />
+          Open scanner
+        </a>
       </div>
     </div>
   );
