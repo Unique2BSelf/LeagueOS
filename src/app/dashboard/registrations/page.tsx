@@ -37,6 +37,8 @@ export default function RegistrationsPage() {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [payingRegistration, setPayingRegistration] = useState<Registration | null>(null)
   const [payingSeason, setPayingSeason] = useState<Season | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [insuranceLoading, setInsuranceLoading] = useState(false)
 
   useEffect(() => {
     const storedUser = getStoredUser()
@@ -89,6 +91,7 @@ export default function RegistrationsPage() {
 
   const handleRegister = async (seasonId: string) => {
     setRegistering(seasonId)
+    setError(null)
 
     try {
       const res = await fetch('/api/registrations', {
@@ -125,8 +128,37 @@ export default function RegistrationsPage() {
       }
     } catch (error) {
       console.error('Failed to register:', error)
+      setError(error instanceof Error ? error.message : 'Failed to register')
     } finally {
       setRegistering(null)
+    }
+  }
+
+  const handlePurchaseInsurance = async () => {
+    setInsuranceLoading(true)
+    setError(null)
+
+    try {
+      const res = await fetch('/api/insurance', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ provider: 'LEAGUE_PROVIDED', cost: 50 }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to purchase insurance')
+      }
+
+      setError('Insurance purchased successfully. You can register now.')
+    } catch (purchaseError) {
+      console.error('Failed to purchase insurance:', purchaseError)
+      setError(purchaseError instanceof Error ? purchaseError.message : 'Failed to purchase insurance')
+    } finally {
+      setInsuranceLoading(false)
     }
   }
 
@@ -196,6 +228,27 @@ export default function RegistrationsPage() {
       <div className="glass-card p-6">
         <h1 className="text-2xl font-bold text-white mb-2">Season Registration</h1>
         <p className="text-white/50 mb-6">Register for upcoming seasons and pay fees</p>
+
+        {error && (
+          <div className={`mb-6 rounded-lg border px-4 py-3 text-sm ${
+            error.includes('successfully')
+              ? 'border-green-500/40 bg-green-500/10 text-green-300'
+              : 'border-red-500/40 bg-red-500/10 text-red-300'
+          }`}>
+            <div className="flex items-center justify-between gap-4">
+              <span>{error}</span>
+              {error.toLowerCase().includes('insurance') && !error.includes('successfully') ? (
+                <button
+                  onClick={handlePurchaseInsurance}
+                  disabled={insuranceLoading}
+                  className="rounded-lg bg-cyan-400 px-3 py-1.5 text-xs font-semibold text-slate-950 disabled:opacity-60"
+                >
+                  {insuranceLoading ? 'Purchasing...' : 'Buy Insurance'}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        )}
 
         {registrations.length > 0 && (
           <div className="mb-8">
