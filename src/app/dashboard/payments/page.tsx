@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
@@ -41,15 +41,6 @@ export default function PaymentsPage() {
   const [payments, setPayments] = useState<PaymentRecord[]>([])
   const [payingRegistration, setPayingRegistration] = useState<RegistrationRecord | null>(null)
 
-  useEffect(() => {
-    if (!user) {
-      setLoading(false)
-      return
-    }
-
-    Promise.all([fetchRegistrations(), fetchPayments()]).finally(() => setLoading(false))
-  }, [user])
-
   const fetchRegistrations = async () => {
     const res = await fetch('/api/registrations', { cache: 'no-store' })
     if (!res.ok) return
@@ -63,6 +54,38 @@ export default function PaymentsPage() {
     const data = await res.json()
     setPayments(data)
   }
+
+  useEffect(() => {
+    if (!user) {
+      setLoading(false)
+      return
+    }
+
+    Promise.all([fetchRegistrations(), fetchPayments()]).finally(() => setLoading(false))
+  }, [user])
+
+  useEffect(() => {
+    if (!user || typeof window === 'undefined') {
+      return
+    }
+
+    const params = new URLSearchParams(window.location.search)
+    const sessionId = params.get('session_id')
+    const paymentState = params.get('payment')
+
+    if (paymentState !== 'success' || !sessionId) {
+      return
+    }
+
+    fetch('/api/payments/checkout/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ sessionId }),
+    })
+      .then(() => Promise.all([fetchRegistrations(), fetchPayments()]))
+      .catch((error) => console.error('Failed to finalize checkout:', error))
+  }, [user])
 
   const handlePaymentSuccess = async () => {
     setPayingRegistration(null)

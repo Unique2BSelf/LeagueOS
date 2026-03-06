@@ -1,5 +1,6 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getRequestOrigin, getStripeClient } from '@/lib/stripe';
 
 export interface PaymentRecord {
   id: string;
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         paymentId: existingPending.id,
         amount: existingPending.amount,
-        clientSecret: existingPending.stripePaymentId ? `${existingPending.id}_secret_mock` : undefined,
+        checkoutUrl: undefined,
         method: existingPending.method,
         message: 'Existing payment intent reused',
       });
@@ -69,6 +70,60 @@ export async function POST(request: NextRequest) {
 
     const paymentId = `pay_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
     const normalizedMethod = method as PaymentRecord['method'];
+
+    if (normalizedMethod === 'CARD' || normalizedMethod === 'APPLE_PAY') {
+      const stripe = getStripeClient();
+      const origin = getRequestOrigin(request);
+      const checkoutSession = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        success_url: `${origin}/dashboard/payments?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${origin}/dashboard/payments?payment=cancelled&registrationId=${registration.id}`,
+        customer_email: registration.user.email,
+        metadata: {
+          registrationId: registration.id,
+          seasonId: registration.seasonId,
+          userId,
+        },
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: 'usd',
+              unit_amount: Math.round(registration.amount * 100),
+              product_data: {
+                name: `${registration.season.name} Registration`,
+                description: `League OS registration for ${registration.user.fullName}`,
+              },
+            },
+          },
+        ],
+      });
+
+      const payment: PaymentRecord = {
+        id: paymentId,
+        registrationId,
+        userId,
+        seasonId: registration.seasonId,
+        amount: registration.amount,
+        method: normalizedMethod,
+        status: 'PENDING',
+        stripePaymentId: checkoutSession.id,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      paymentsDb.set(paymentId, payment);
+
+      return NextResponse.json({
+        paymentId,
+        amount: registration.amount,
+        checkoutUrl: checkoutSession.url,
+        stripeSessionId: checkoutSession.id,
+        method: normalizedMethod,
+        message: 'Stripe Checkout session created',
+      });
+    }
+
     const payment: PaymentRecord = {
       id: paymentId,
       registrationId,
@@ -77,7 +132,6 @@ export async function POST(request: NextRequest) {
       amount: registration.amount,
       method: normalizedMethod,
       status: 'PENDING',
-      stripePaymentId: normalizedMethod === 'CARD' || normalizedMethod === 'APPLE_PAY' ? `pi_mock_${Date.now()}` : undefined,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -87,9 +141,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       paymentId,
       amount: registration.amount,
-      clientSecret: payment.stripePaymentId ? `${paymentId}_secret_mock` : undefined,
       method: normalizedMethod,
-      message: payment.stripePaymentId ? 'Demo mode: payment would be processed via Stripe' : `Payment method ${normalizedMethod} awaiting admin confirmation.`,
+      message: `Payment method ${normalizedMethod} awaiting admin confirmation.`,
     });
   } catch (error) {
     console.error('Error creating payment:', error);
@@ -158,16 +211,13 @@ export async function PUT(request: NextRequest) {
 
     const actor = await getActor(userId);
     if (!actor) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (actor.role !== 'ADMIN' && actor.role !== 'MODERATOR') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     const { paymentId, action, notes } = await request.json();
     const payment = paymentsDb.get(paymentId);
     if (!payment) return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
-
-    const isAdmin = actor.role === 'ADMIN' || actor.role === 'MODERATOR';
-    const isOwner = payment.userId === userId;
-    if (!isAdmin && !(isOwner && action === 'confirm')) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
 
     if (action === 'confirm') {
       payment.status = 'COMPLETED';
@@ -189,7 +239,6 @@ export async function PUT(request: NextRequest) {
 
       await recordRegistrationLedger(payment.userId, payment.amount, `Registration payment for ${registration.season.name} via ${payment.method}`);
     } else if (action === 'fail') {
-      if (!isAdmin) return NextResponse.json({ error: 'Admin only' }, { status: 403 });
       payment.status = 'FAILED';
       payment.notes = notes;
       payment.updatedAt = new Date();

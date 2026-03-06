@@ -1,7 +1,7 @@
-﻿'use client'
+'use client'
 
 import { useState } from 'react'
-import { CreditCard, DollarSign, Check, Loader2, AlertCircle, Lock, Apple, X } from 'lucide-react'
+import { CreditCard, Check, Loader2, AlertCircle, Lock, Apple, X, ExternalLink } from 'lucide-react'
 import { getAuthHeaders } from '@/lib/client-auth'
 
 interface PaymentFormProps {
@@ -17,24 +17,6 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [step, setStep] = useState<'card' | 'processing' | 'success'>('card')
-  const [cardNumber, setCardNumber] = useState('')
-  const [expiry, setExpiry] = useState('')
-  const [cvc, setCvc] = useState('')
-  const [name, setName] = useState('')
-
-  const formatCardNumber = (value: string) => {
-    const digits = value.replace(/\s+/g, '').replace(/[^0-9]/g, '')
-    const parts = digits.match(/.{1,4}/g)
-    return parts ? parts.join(' ') : ''
-  }
-
-  const formatExpiry = (value: string) => {
-    const digits = value.replace(/\D/g, '').slice(0, 4)
-    if (digits.length < 3) {
-      return digits
-    }
-    return `${digits.slice(0, 2)}/${digits.slice(2)}`
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -57,24 +39,12 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
         throw new Error(data.error || 'Payment failed')
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 1200))
-
-      const confirmRes = await fetch('/api/payments', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders(),
-        },
-        body: JSON.stringify({ paymentId: data.paymentId, action: 'confirm' }),
-      })
-
-      const confirmed = await confirmRes.json()
-      if (!confirmRes.ok) {
-        throw new Error(confirmed.error || 'Failed to confirm payment')
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl
+        return
       }
 
-      setStep('success')
-      setTimeout(() => onSuccess(data.paymentId), 1000)
+      throw new Error(data.message || 'Checkout URL missing')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Payment failed')
       setStep('card')
@@ -99,8 +69,8 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
     return (
       <div className="text-center py-12">
         <Loader2 className="w-12 h-12 animate-spin text-cyan-400 mx-auto mb-4" />
-        <h3 className="text-xl font-bold text-white mb-2">Processing Payment...</h3>
-        <p className="text-white/60">Please wait while we process your payment.</p>
+        <h3 className="text-xl font-bold text-white mb-2">Redirecting to Stripe...</h3>
+        <p className="text-white/60">Please wait while we open secure checkout.</p>
       </div>
     )
   }
@@ -162,64 +132,16 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
           </div>
         </div>
 
-        <div className="space-y-4">
-          <div>
-            <label className="text-white/70 text-sm mb-1 block">Cardholder Name</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="John Doe"
-              className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-cyan-500"
-              required
-            />
-          </div>
-          <div>
-            <label className="text-white/70 text-sm mb-1 block">Card Number</label>
-            <div className="relative">
-              <input
-                type="text"
-                value={cardNumber}
-                onChange={(e) => setCardNumber(formatCardNumber(e.target.value).slice(0, 19))}
-                placeholder="4242 4242 4242 4242"
-                maxLength={19}
-                className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-cyan-500 pr-12"
-                required
-              />
-              <CreditCard className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-white/70 text-sm mb-1 block">Expiry Date</label>
-              <input
-                type="text"
-                value={expiry}
-                onChange={(e) => setExpiry(formatExpiry(e.target.value))}
-                placeholder="MM/YY"
-                maxLength={5}
-                className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-cyan-500"
-                required
-              />
-            </div>
-            <div>
-              <label className="text-white/70 text-sm mb-1 block">CVC</label>
-              <input
-                type="text"
-                value={cvc}
-                onChange={(e) => setCvc(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                placeholder="123"
-                maxLength={4}
-                className="w-full bg-white/5 border border-white/20 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-cyan-500"
-                required
-              />
-            </div>
-          </div>
+        <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-cyan-100">
+          <p className="font-medium text-cyan-200">Hosted Stripe Checkout</p>
+          <p className="mt-1 text-cyan-100/80">
+            You will be redirected to Stripe to complete this payment securely. Registration status updates after Stripe confirms the session.
+          </p>
         </div>
 
         <div className="flex items-center justify-center gap-2 mt-6 text-white/40">
           <Lock className="w-4 h-4" />
-          <span className="text-xs">Demo mode - no real charges</span>
+          <span className="text-xs">Secure checkout via Stripe</span>
         </div>
 
         <button
@@ -230,12 +152,12 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
           {processing ? (
             <>
               <Loader2 className="w-5 h-5 animate-spin" />
-              Processing...
+              Redirecting...
             </>
           ) : (
             <>
-              <DollarSign className="w-5 h-5" />
-              Pay ${amount.toFixed(2)}
+              <ExternalLink className="w-5 h-5" />
+              Continue to Stripe
             </>
           )}
         </button>
@@ -243,10 +165,9 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
 
       <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
         <p className="text-yellow-300 text-xs text-center">
-          <strong>Demo Mode:</strong> Use any card number. No real charges will be made.
+          <strong>Sandbox:</strong> This dev environment uses your Stripe test account.
         </p>
       </div>
     </div>
   )
 }
-
