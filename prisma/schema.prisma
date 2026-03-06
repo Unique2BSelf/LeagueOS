@@ -16,12 +16,6 @@ enum Role {
   SPONSOR
 }
 
-enum MatchType {
-  REGULAR
-  FRIENDLY
-  BYE
-}
-
 enum MatchStatus {
   SCHEDULED
   LIVE
@@ -29,6 +23,12 @@ enum MatchStatus {
   DISPUTED
   RAINOUT
   FORFEIT
+}
+
+enum MatchType {
+  REGULAR
+  FRIENDLY
+  BYE
 }
 
 enum TransactionType {
@@ -39,6 +39,28 @@ enum TransactionType {
   DONATION
   REFUND
   REIMBURSEMENT
+}
+
+enum FileCategory {
+  RULES
+  FIELD_MAP
+  WAIVER
+  CERTIFICATION
+  BACKGROUND_CHECK
+  FUNDRAISING_FORM
+  TEAM_ASSET
+  REPORT
+  PHOTO
+  OTHER
+}
+
+enum FileVisibility {
+  PUBLIC
+  LEAGUE
+  TEAM
+  OWNER
+  REF_ONLY
+  ADMIN_ONLY
 }
 
 model User {
@@ -85,6 +107,7 @@ model User {
   registrations     Registration[]
   insurancePolicies InsurancePolicy[]
   messages          Message[]
+  uploadedFiles     StoredFile[]
 }
 
 model Team {
@@ -95,17 +118,12 @@ model Team {
   primaryColor      String
   secondaryColor   String
   jerseyPhotoUrl    String?
-  jerseyColor       String?
-  jerseyPattern     String?
-  logoUrl           String?
-  sponsorLogos      String[]
   escrowTarget      Float
   currentBalance    Float               @default(0)
   isConfirmed       Boolean             @default(false)
   approvalStatus    String              @default("PENDING") // PENDING, APPROVED, REJECTED
   rejectionReason   String?             // Reason if rejected
   subQuotaRemaining Int                 @default(10)
-  blackoutDates    String[]             // Dates team cannot play
   sponsorId         String?
   seasonId          String
   // Invite code for players to join
@@ -141,11 +159,11 @@ model Match {
   homeTeamId        String
   awayTeamId        String
   refId             String?
+  matchType         MatchType?          @default(REGULAR)
+  gameLengthMinutes Int?                @default(60)
   homeScore         Int?
   awayScore         Int?
   status            MatchStatus         @default(SCHEDULED)
-  matchType         MatchType           @default(REGULAR)
-  gameLengthMinutes Int                 @default(60)
   checklistDone     Boolean             @default(false)
   streamLink        String?
   weatherStatus     String?
@@ -154,7 +172,6 @@ model Match {
   homeTeam          Team                @relation("Home", fields: [homeTeamId], references: [id])
   awayTeam          Team                @relation("Away", fields: [awayTeamId], references: [id])
   ref               User?               @relation("MatchRef", fields: [refId], references: [id])
-  field             Field?              @relation(fields: [fieldId], references: [id])
   subs              Sub[]
   disciplinary      DisciplinaryAction[]
   season            Season              @relation(fields: [seasonId], references: [id])
@@ -232,7 +249,6 @@ model Field {
 
   location      Location            @relation(fields: [locationId], references: [id])
   maintenance   MaintenanceLog[]
-  matches       Match[]
 }
 
 model Season {
@@ -500,4 +516,30 @@ model DiscountCode {
   description     String?
   seasonId        String?   // null = all seasons
   createdAt       DateTime  @default(now())
+}
+
+model StoredFile {
+  id             String         @id @default(uuid())
+  displayName    String
+  originalName   String
+  storageKey     String         @unique
+  mimeType       String
+  sizeBytes      Int
+  category       FileCategory   @default(OTHER)
+  visibility     FileVisibility @default(LEAGUE)
+  description    String?
+  uploadedById   String
+  teamId         String?
+  seasonId       String?
+  subjectUserId  String?
+  isArchived     Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  uploadedBy     User           @relation(fields: [uploadedById], references: [id])
+
+  @@index([visibility, createdAt])
+  @@index([uploadedById, createdAt])
+  @@index([teamId, createdAt])
+  @@index([subjectUserId, createdAt])
 }

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getRequestOrigin, getStripeClient } from '@/lib/stripe';
 
+export const runtime = 'nodejs';
+
 export interface PaymentRecord {
   id: string;
   registrationId: string;
@@ -295,3 +297,4 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to process refund' }, { status: 500 });
   }
 }
+

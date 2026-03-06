@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { Home, User, CreditCard, Camera, Award, Users, Calendar, Settings, Shield, Heart, ShoppingCart, BarChart3, AlertTriangle, Menu, X, ChevronDown, FileText, Ticket, ClipboardList, DollarSign, ClipboardCheck, ExternalLink, Lock } from 'lucide-react';
+import { Home, User, CreditCard, Users, Calendar, Settings, Shield, Heart, ShoppingCart, BarChart3, AlertTriangle, Menu, X, ChevronDown, FileText, Ticket, ClipboardList, DollarSign, ClipboardCheck, ExternalLink, Lock } from 'lucide-react';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -26,6 +26,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       items: [
         { href: '/dashboard/id', icon: User, label: 'My ID' },
         { href: '/dashboard/background-check', icon: Shield, label: 'Background' },
+        { href: '/dashboard/files', icon: FileText, label: 'Files' },
       ]
     },
     {
@@ -36,9 +37,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         { href: '/matches', icon: Calendar, label: 'Matches' },
         { href: '/dashboard/subs', icon: Users, label: 'Subs' },
         { href: '/dashboard/free-agents', icon: Users, label: 'Free Agents' },
-        { href: '/dashboard/schedule-generator', icon: Calendar, label: 'Schedule Generator' },
-        { href: '/dashboard/scan', icon: Camera, label: 'ID Scanner' },
-        { href: '/dashboard/refs', icon: Award, label: 'Ref Dashboard' },
       ]
     },
     {
@@ -70,9 +68,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         { href: '/dashboard/users', icon: Users, label: 'Users' },
         { href: '/dashboard/ringers', icon: AlertTriangle, label: 'Ringers' },
         { href: '/dashboard/insurance', icon: Shield, label: 'Insurance' },
-        { href: '/dashboard/schedule-generator', icon: Calendar, label: 'Schedule Generator' },
-        { href: '/dashboard/scan', icon: Camera, label: 'ID Scanner' },
-        { href: '/dashboard/refs', icon: Award, label: 'Ref Dashboard' },
         { href: '/dashboard/admin/locked', icon: Lock, label: 'Locked Players' },
       ]
     },
@@ -104,7 +99,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </button>
                 
                 <div 
-                  className="absolute top-full left-0 mt-1 py-2 w-48 glass-card rounded-lg border border-white/10 shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible"
+                  className="absolute top-full left-0 mt-1 py-2 w-48 glass-card rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200"
                   onMouseEnter={() => setActiveDropdown(group.id)}
                   onMouseLeave={() => setActiveDropdown(null)}
                 >
