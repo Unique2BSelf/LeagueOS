@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getAdminActor } from '@/lib/admin-auth';
 
 // GET /api/users - List all users with pagination, search, filter by role
 export async function GET(request: NextRequest) {
+  const actor = await getAdminActor(request);
+  if (!actor) {
+    return NextResponse.json({ error: 'Admin only' }, { status: 403 });
+  }
+
   const { searchParams } = new URL(request.url);
   
   const page = parseInt(searchParams.get('page') || '1');

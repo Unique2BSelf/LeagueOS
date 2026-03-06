@@ -2,16 +2,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createJsonRequest } from '../helpers/request';
 
 const prismaMock = {
-  user: {
-    findUnique: vi.fn(),
-  },
   season: {
     create: vi.fn(),
     findMany: vi.fn(),
+    findUnique: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
   },
 };
 
+const getAdminActorMock = vi.fn();
+const createAuditLogMock = vi.fn();
+
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
+vi.mock('@/lib/admin-auth', () => ({ getAdminActor: getAdminActorMock }));
+vi.mock('@/lib/audit', () => ({ createAuditLog: createAuditLogMock }));
 
 describe('Season API', () => {
   beforeEach(() => {
@@ -19,7 +24,7 @@ describe('Season API', () => {
   });
 
   it('blocks non-admin users from creating seasons', async () => {
-    prismaMock.user.findUnique.mockResolvedValueOnce({ id: 'player-1', role: 'PLAYER' });
+    getAdminActorMock.mockResolvedValueOnce(null);
 
     const { POST } = await import('@/app/api/seasons/route');
     const response = await POST(createJsonRequest('http://localhost/api/seasons', {
@@ -37,7 +42,12 @@ describe('Season API', () => {
   });
 
   it('returns newly created seasons in the season listing flow', async () => {
-    prismaMock.user.findUnique.mockResolvedValueOnce({ id: 'admin-1', role: 'ADMIN' });
+    getAdminActorMock.mockResolvedValueOnce({
+      id: 'admin-1',
+      email: 'admin@example.com',
+      role: 'ADMIN',
+    });
+
     prismaMock.season.create.mockResolvedValueOnce({
       id: 'season-1',
       name: 'Spring 2026',
@@ -49,6 +59,7 @@ describe('Season API', () => {
       subQuota: 10,
       isArchived: false,
     });
+
     prismaMock.season.findMany.mockResolvedValueOnce([
       {
         id: 'season-1',
@@ -63,7 +74,6 @@ describe('Season API', () => {
     const seasonsRoute = await import('@/app/api/seasons/route');
     const createResponse = await seasonsRoute.POST(createJsonRequest('http://localhost/api/seasons', {
       method: 'POST',
-      headers: { 'x-user-id': 'admin-1' },
       body: {
         name: 'Spring 2026',
         startDate: '2026-03-01T00:00:00.000Z',
@@ -72,6 +82,12 @@ describe('Season API', () => {
     }));
 
     expect(createResponse.status).toBe(200);
+    expect(createAuditLogMock).toHaveBeenCalledWith(expect.objectContaining({
+      actionType: 'CREATE',
+      entityType: 'SEASON',
+      entityId: 'season-1',
+    }));
+
     const listResponse = await seasonsRoute.GET(createJsonRequest('http://localhost/api/seasons'));
     const seasons = await listResponse.json();
 

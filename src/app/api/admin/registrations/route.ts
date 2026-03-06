@@ -1,17 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getAdminActor } from '@/lib/admin-auth';
+import { createAuditLog } from '@/lib/audit';
 
 // GET /api/admin/registrations - List all registrations for admin (with filters)
 export async function GET(request: NextRequest) {
   try {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Check if user is admin
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.role !== 'ADMIN') {
+    const actor = await getAdminActor(request);
+    if (!actor) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -57,14 +53,8 @@ export async function GET(request: NextRequest) {
 // PATCH /api/admin/registrations - Approve or reject registrations
 export async function PATCH(request: NextRequest) {
   try {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Check if user is admin
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.role !== 'ADMIN') {
+    const actor = await getAdminActor(request);
+    if (!actor) {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -79,7 +69,17 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'rejectionReason required for rejection' }, { status: 400 });
     }
 
-    const updateData = action === 'APPROVE' 
+    const existingRegistrations = await prisma.registration.findMany({
+      where: {
+        id: { in: registrationIds },
+      },
+      include: {
+        user: { select: { email: true, fullName: true } },
+        season: { select: { name: true } },
+      },
+    });
+
+    const updateData = action === 'APPROVE'
       ? { status: 'APPROVED', rejectionReason: null }
       : { status: 'REJECTED', rejectionReason };
 
@@ -108,6 +108,27 @@ export async function PATCH(request: NextRequest) {
           : `Hi ${reg.user.fullName},\n\nUnfortunately, your registration for ${reg.season.name} was not approved.\n\nReason: ${rejectionReason}\n\nPlease contact support if you have questions.\n\nThank you,\nLeague OS`,
       };
       console.log('[MOCK EMAIL SENT]', mockEmail);
+
+      const before = existingRegistrations.find((existing) => existing.id === reg.id);
+      await createAuditLog({
+        actor,
+        actionType: action === 'APPROVE' ? 'APPROVE' : 'REJECT',
+        entityType: 'REGISTRATION',
+        entityId: reg.id,
+        before: before
+          ? {
+              status: before.status,
+              rejectionReason: before.rejectionReason,
+              paid: before.paid,
+            }
+          : null,
+        after: {
+          status: reg.status,
+          rejectionReason: reg.rejectionReason,
+          paid: reg.paid,
+        },
+        notes: action === 'REJECT' ? rejectionReason : null,
+      });
     }
 
     return NextResponse.json({ success: true, updated: results.length });

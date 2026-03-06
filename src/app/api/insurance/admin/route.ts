@@ -1,17 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getAdminActor } from '@/lib/admin-auth';
+import { createAuditLog } from '@/lib/audit';
 
 // GET /api/insurance/admin - Get all players with insurance status (admin)
 export async function GET(request: NextRequest) {
   try {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Check admin role
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.role !== 'ADMIN') {
+    const actor = await getAdminActor(request);
+    if (!actor) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 });
     }
 
@@ -114,14 +110,8 @@ export async function GET(request: NextRequest) {
 // POST /api/insurance/admin - Purchase insurance for users (bulk)
 export async function POST(request: NextRequest) {
   try {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Check admin role
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.role !== 'ADMIN') {
+    const actor = await getAdminActor(request);
+    if (!actor) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 });
     }
 
@@ -168,6 +158,22 @@ export async function POST(request: NextRequest) {
             isInsured: true,
             insuranceExpiry: endDate,
           },
+        });
+
+        await createAuditLog({
+          actor,
+          actionType: 'ACTIVATE',
+          entityType: 'INSURANCE_POLICY',
+          entityId: policy.id,
+          after: {
+            userId: targetUserId,
+            provider: policy.provider,
+            startDate: policy.startDate.toISOString(),
+            endDate: policy.endDate.toISOString(),
+            cost: policy.cost,
+            status: policy.status,
+          },
+          notes: 'Bulk insurance purchase by admin',
         });
 
         results.push({ userId: targetUserId, success: true, policy });

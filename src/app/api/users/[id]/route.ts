@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getAdminActor } from '@/lib/admin-auth';
+import { createAuditLog } from '@/lib/audit';
 
 // GET /api/users/[id] - Get single user details
 // PATCH /api/users/[id] - Update user
@@ -10,6 +12,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const actor = await getAdminActor(request);
+  if (!actor) {
+    return NextResponse.json({ error: 'Admin only' }, { status: 403 });
+  }
   
   try {
     const user = await prisma.user.findUnique({
@@ -162,6 +168,11 @@ export async function PATCH(
   const { id } = await params;
   
   try {
+    const actor = await getAdminActor(request);
+    if (!actor) {
+      return NextResponse.json({ error: 'Admin only' }, { status: 403 });
+    }
+
     const body = await request.json();
     const {
       fullName,
@@ -224,6 +235,30 @@ export async function PATCH(
       where: { id },
       data: updateData,
     });
+
+    await createAuditLog({
+      actor,
+      actionType: 'UPDATE',
+      entityType: 'USER',
+      entityId: id,
+      before: {
+        fullName: existingUser.fullName,
+        email: existingUser.email,
+        role: existingUser.role,
+        isInsured: existingUser.isInsured,
+        isActive: existingUser.isActive,
+        hideFromDirectory: existingUser.hideFromDirectory,
+      },
+      after: {
+        fullName: user.fullName,
+        email: user.email,
+        role: user.role,
+        isInsured: user.isInsured,
+        isActive: user.isActive,
+        hideFromDirectory: user.hideFromDirectory,
+      },
+      notes: teamId !== undefined ? `Team assignment updated to ${teamId ?? 'none'}` : null,
+    });
     
     return NextResponse.json({
       id: user.id,
@@ -248,6 +283,11 @@ export async function DELETE(
   const hard = searchParams.get('hard') === 'true';
   
   try {
+    const actor = await getAdminActor(request);
+    if (!actor) {
+      return NextResponse.json({ error: 'Admin only' }, { status: 403 });
+    }
+
     const existingUser = await prisma.user.findUnique({
       where: { id },
     });
@@ -278,6 +318,20 @@ export async function DELETE(
         data: { isActive: false },
       });
     }
+
+    await createAuditLog({
+      actor,
+      actionType: 'DELETE',
+      entityType: 'USER',
+      entityId: id,
+      before: {
+        fullName: existingUser.fullName,
+        email: existingUser.email,
+        role: existingUser.role,
+        isActive: existingUser.isActive,
+      },
+      notes: hard ? 'Hard delete' : 'Soft delete',
+    });
     
     return NextResponse.json({ success: true });
   } catch (error) {

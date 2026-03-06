@@ -63,6 +63,25 @@ enum FileVisibility {
   ADMIN_ONLY
 }
 
+enum AuditActionType {
+  CREATE
+  UPDATE
+  DELETE
+  APPROVE
+  REJECT
+  ACTIVATE
+  DEACTIVATE
+  EXPORT
+}
+
+enum AuditEntityType {
+  SEASON
+  REGISTRATION
+  INSURANCE_POLICY
+  USER
+  REPORT
+}
+
 model User {
   id                String              @id @default(uuid())
   role              Role                @default(PLAYER)
@@ -561,4 +580,22 @@ model StoredFile {
   @@index([uploadedById, createdAt])
   @@index([teamId, createdAt])
   @@index([subjectUserId, createdAt])
+}
+
+model AuditLog {
+  id            String           @id @default(uuid())
+  actorUserId   String
+  actorEmail    String?
+  actionType    AuditActionType
+  entityType    AuditEntityType
+  entityId      String
+  before        Json?
+  after         Json?
+  notes         String?
+  createdAt     DateTime         @default(now())
+
+  @@index([createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([entityType, entityId])
+  @@index([actionType, createdAt])
 }

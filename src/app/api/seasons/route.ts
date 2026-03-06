@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getAdminActor } from '@/lib/admin-auth';
+import { createAuditLog } from '@/lib/audit';
 
 // GET /api/seasons - List all seasons
 export async function GET(request: NextRequest) {
@@ -28,14 +30,8 @@ export async function GET(request: NextRequest) {
 // POST /api/seasons - Create new season
 export async function POST(request: NextRequest) {
   try {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Check admin role
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.role !== 'ADMIN') {
+    const actor = await getAdminActor(request);
+    if (!actor) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 });
     }
 
@@ -54,6 +50,19 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    await createAuditLog({
+      actor,
+      actionType: 'CREATE',
+      entityType: 'SEASON',
+      entityId: season.id,
+      after: {
+        name: season.name,
+        startDate: season.startDate.toISOString(),
+        endDate: season.endDate?.toISOString() || null,
+        isArchived: season.isArchived,
+      },
+    });
+
     return NextResponse.json(season);
   } catch (error) {
     console.error('Error creating season:', error);
@@ -64,17 +73,16 @@ export async function POST(request: NextRequest) {
 // PATCH /api/seasons - Update season
 export async function PATCH(request: NextRequest) {
   try {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.role !== 'ADMIN') {
+    const actor = await getAdminActor(request);
+    if (!actor) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 });
     }
 
     const { id, ...data } = await request.json();
+    const existingSeason = await prisma.season.findUnique({ where: { id } });
+    if (!existingSeason) {
+      return NextResponse.json({ error: 'Season not found' }, { status: 404 });
+    }
 
     // Convert date strings to Date objects
     if (data.startDate) data.startDate = new Date(data.startDate);
@@ -83,6 +91,25 @@ export async function PATCH(request: NextRequest) {
     const season = await prisma.season.update({
       where: { id },
       data,
+    });
+
+    await createAuditLog({
+      actor,
+      actionType: 'UPDATE',
+      entityType: 'SEASON',
+      entityId: season.id,
+      before: {
+        name: existingSeason.name,
+        startDate: existingSeason.startDate.toISOString(),
+        endDate: existingSeason.endDate?.toISOString() || null,
+        isArchived: existingSeason.isArchived,
+      },
+      after: {
+        name: season.name,
+        startDate: season.startDate.toISOString(),
+        endDate: season.endDate?.toISOString() || null,
+        isArchived: season.isArchived,
+      },
     });
 
     return NextResponse.json(season);
@@ -95,13 +122,8 @@ export async function PATCH(request: NextRequest) {
 // DELETE /api/seasons - Delete season
 export async function DELETE(request: NextRequest) {
   try {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.role !== 'ADMIN') {
+    const actor = await getAdminActor(request);
+    if (!actor) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 });
     }
 
@@ -112,8 +134,26 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Season ID required' }, { status: 400 });
     }
 
+    const existingSeason = await prisma.season.findUnique({ where: { id } });
+    if (!existingSeason) {
+      return NextResponse.json({ error: 'Season not found' }, { status: 404 });
+    }
+
     await prisma.season.delete({
       where: { id },
+    });
+
+    await createAuditLog({
+      actor,
+      actionType: 'DELETE',
+      entityType: 'SEASON',
+      entityId: id,
+      before: {
+        name: existingSeason.name,
+        startDate: existingSeason.startDate.toISOString(),
+        endDate: existingSeason.endDate?.toISOString() || null,
+        isArchived: existingSeason.isArchived,
+      },
     });
 
     return NextResponse.json({ success: true });
