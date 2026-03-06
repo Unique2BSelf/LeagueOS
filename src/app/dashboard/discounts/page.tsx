@@ -1,8 +1,9 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { useSessionUser } from '@/hooks/use-session-user'
 import { 
   Tag, Plus, Trash2, Copy, Check, X, 
   Percent, DollarSign, Calendar, Loader2, Settings
@@ -24,7 +25,7 @@ interface DiscountCode {
 
 export default function DiscountsPage() {
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
+  const { user, loading: userLoading } = useSessionUser()
   const [loading, setLoading] = useState(true)
   const [discounts, setDiscounts] = useState<DiscountCode[]>([])
   const [showForm, setShowForm] = useState(false)
@@ -41,16 +42,22 @@ export default function DiscountsPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
   useEffect(() => {
-    const stored = localStorage.getItem('league_user')
-    if (stored) {
-      const userData = JSON.parse(stored)
-      setUser(userData)
-      if (userData.role === 'ADMIN') {
-        fetchDiscounts()
-      }
+    if (userLoading) {
+      return
     }
+
+    if (!user) {
+      setLoading(false)
+      return
+    }
+
+    if (user.role === 'ADMIN') {
+      fetchDiscounts().finally(() => setLoading(false))
+      return
+    }
+
     setLoading(false)
-  }, [])
+  }, [user, userLoading])
 
   const fetchDiscounts = async () => {
     try {
@@ -292,7 +299,7 @@ export default function DiscountsPage() {
                       {discount.description && ` - ${discount.description}`}
                     </p>
                     <div className="flex gap-4 mt-1 text-xs text-white/40">
-                      <span>{discount.currentUses}/{discount.maxUses || '∞'} uses</span>
+                      <span>{discount.currentUses}/{discount.maxUses || 'âˆž'} uses</span>
                       {discount.expiresAt && (
                         <span>Expires: {new Date(discount.expiresAt).toLocaleDateString()}</span>
                       )}
@@ -323,3 +330,4 @@ export default function DiscountsPage() {
     </div>
   )
 }
+

@@ -1,7 +1,8 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useSessionUser } from '@/hooks/use-session-user'
 import { 
   Users, Check, X, Loader2, Search, Filter, 
   CheckCircle, XCircle, Clock, AlertTriangle, Mail, ChevronDown
@@ -38,7 +39,7 @@ interface Registration {
 
 export default function RegistrationApprovalPage() {
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
+  const { user, loading: userLoading } = useSessionUser()
   const [loading, setLoading] = useState(true)
   const [registrations, setRegistrations] = useState<Registration[]>([])
   const [filteredRegs, setFilteredRegs] = useState<Registration[]>([])
@@ -51,20 +52,24 @@ export default function RegistrationApprovalPage() {
   const [pendingAction, setPendingAction] = useState<{ ids: string[], action: string } | null>(null)
 
   useEffect(() => {
-    const stored = localStorage.getItem('league_user')
-    if (stored) {
-      const userData = JSON.parse(stored)
-      setUser(userData)
-      if (userData.role !== 'ADMIN') {
-        router.push('/dashboard')
-        return
-      }
-      fetchRegistrations()
-    } else {
-      router.push('/login')
+    if (userLoading) {
+      return
     }
-    setLoading(false)
-  }, [])
+
+    if (!user) {
+      router.push('/login')
+      setLoading(false)
+      return
+    }
+
+    if (user.role !== 'ADMIN') {
+      router.push('/dashboard')
+      setLoading(false)
+      return
+    }
+
+    fetchRegistrations().finally(() => setLoading(false))
+  }, [user, userLoading, router])
 
   const fetchRegistrations = async () => {
     try {
@@ -390,3 +395,4 @@ export default function RegistrationApprovalPage() {
     </div>
   )
 }
+

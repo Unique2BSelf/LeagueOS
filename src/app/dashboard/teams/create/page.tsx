@@ -1,8 +1,9 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { useSessionUser } from '@/hooks/use-session-user'
 import { Plus, Users, Palette, Check, Loader2 } from 'lucide-react'
 
 const divisions = [
@@ -26,7 +27,7 @@ const colors = [
 
 export default function CreateTeamPage() {
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
+  const { user, loading: userLoading } = useSessionUser()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [formData, setFormData] = useState({
@@ -36,13 +37,6 @@ export default function CreateTeamPage() {
     secondaryColor: '#FFFFFF',
     escrowTarget: '2000',
   })
-
-  useEffect(() => {
-    const stored = localStorage.getItem('league_user')
-    if (stored) {
-      setUser(JSON.parse(stored))
-    }
-  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -87,6 +81,14 @@ export default function CreateTeamPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  if (userLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
+      </div>
+    )
   }
 
   if (!user) {
@@ -256,3 +258,4 @@ export default function CreateTeamPage() {
     </div>
   )
 }
+

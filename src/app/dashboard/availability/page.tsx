@@ -1,8 +1,9 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { useSessionUser } from '@/hooks/use-session-user'
 import { Calendar, Check, X, HelpCircle, Loader2, Clock, MapPin } from 'lucide-react'
 
 interface Match {
@@ -17,19 +18,24 @@ interface Match {
 
 export default function AvailabilityPage() {
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
+  const { user, loading: userLoading } = useSessionUser()
   const [loading, setLoading] = useState(true)
   const [matches, setMatches] = useState<Match[]>([])
   const [saving, setSaving] = useState<string | null>(null)
 
   useEffect(() => {
-    const stored = localStorage.getItem('league_user')
-    if (stored) {
-      setUser(JSON.parse(stored))
-      fetchMatches()
+    if (userLoading) {
+      return
     }
+
+    if (!user) {
+      setLoading(false)
+      return
+    }
+
+    fetchMatches()
     setLoading(false)
-  }, [])
+  }, [user, userLoading])
 
   const fetchMatches = async () => {
     // Mock upcoming matches
@@ -194,3 +200,4 @@ export default function AvailabilityPage() {
     </div>
   )
 }
+

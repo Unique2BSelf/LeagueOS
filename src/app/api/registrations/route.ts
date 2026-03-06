@@ -1,21 +1,57 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
-// Calculate pro-rated fee
 function calculateProRatedFee(baseFee: number, seasonStart: Date, seasonEnd: Date | null): number {
   if (!seasonEnd) return baseFee;
-  
+
   const now = new Date();
   const totalDays = Math.ceil((seasonEnd.getTime() - seasonStart.getTime()) / (1000 * 60 * 60 * 24));
   const daysRemaining = Math.ceil((seasonEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-  
-  if (daysRemaining <= 0) return 0;
-  
+
+  if (daysRemaining <= 0 || totalDays <= 0) return 0;
+
   const percentRemaining = daysRemaining / totalDays;
   return Math.round(baseFee * percentRemaining * 100) / 100;
 }
 
-// GET /api/registrations - List user's registrations
+async function applyDiscountCode(seasonId: string, code: string | null | undefined, baseAmount: number) {
+  if (!code) {
+    return { amount: baseAmount, discountCodeId: null as string | null, discountAmount: 0 };
+  }
+
+  const normalizedCode = String(code).trim().toUpperCase();
+  if (!normalizedCode) {
+    return { amount: baseAmount, discountCodeId: null as string | null, discountAmount: 0 };
+  }
+
+  const discount = await prisma.discountCode.findUnique({ where: { code: normalizedCode } });
+  if (!discount || !discount.isActive) {
+    throw new Error('Invalid discount code');
+  }
+
+  if (discount.seasonId && discount.seasonId !== seasonId) {
+    throw new Error('Discount code is not valid for this season');
+  }
+
+  if (discount.expiresAt && discount.expiresAt < new Date()) {
+    throw new Error('Discount code has expired');
+  }
+
+  if (discount.maxUses !== null && discount.currentUses >= discount.maxUses) {
+    throw new Error('Discount code has reached its usage limit');
+  }
+
+  const discountAmount = discount.discountType === 'PERCENTAGE'
+    ? Math.round(baseAmount * (discount.discountValue / 100) * 100) / 100
+    : Math.min(baseAmount, discount.discountValue);
+
+  return {
+    amount: Math.max(0, Math.round((baseAmount - discountAmount) * 100) / 100),
+    discountCodeId: discount.id,
+    discountAmount,
+  };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const userId = request.headers.get('x-user-id');
@@ -25,9 +61,7 @@ export async function GET(request: NextRequest) {
 
     const registrations = await prisma.registration.findMany({
       where: { userId },
-      include: {
-        season: true,
-      },
+      include: { season: true },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -38,7 +72,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/registrations - Create new season registration
 export async function POST(request: NextRequest) {
   try {
     const userId = request.headers.get('x-user-id');
@@ -46,24 +79,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { seasonId, waiverAgreed, discountCode, photoVerified } = await request.json();
+    const { seasonId, waiverAgreed, discountCode } = await request.json();
+    const ipAddress = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'unknown';
 
-    // Get client's IP address for waiver signing
-    const ipAddress = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() 
-      || request.headers.get('x-real-ip') 
-      || 'unknown';
-
-    // Get registration form config to check if waiver is required
-    const registrationForm = await prisma.registrationForm.findUnique({
-      where: { seasonId },
+    const existing = await prisma.registration.findUnique({
+      where: { userId_seasonId: { userId, seasonId } },
     });
+    if (existing) {
+      return NextResponse.json({ error: 'Already registered for this season' }, { status: 400 });
+    }
 
-    // Check if waiver is required
+    const registrationForm = await prisma.registrationForm.findUnique({ where: { seasonId } });
     if (registrationForm?.requireWaiver && !waiverAgreed) {
       return NextResponse.json({ error: 'Waiver acceptance is required' }, { status: 400 });
     }
 
-    // Get current active insurance policy
     const insurance = await prisma.insurancePolicy.findFirst({
       where: {
         userId,
@@ -73,7 +103,6 @@ export async function POST(request: NextRequest) {
       orderBy: { endDate: 'desc' },
     });
 
-    // Get season and calculate fee based on tiered pricing
     const season = await prisma.season.findUnique({
       where: { id: seasonId },
       include: {
@@ -88,43 +117,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Season not found' }, { status: 404 });
     }
 
-    // Calculate fee based on current date and pricing tiers
     const now = new Date();
-    let baseAmount = season.pricingTiers.find(
-      (tier) => now >= tier.startDate && now <= tier.endDate
-    )?.amount || season.pricingTiers[season.pricingTiers.length - 1]?.amount || 150;
+    const activeTierAmount = season.pricingTiers.find((tier) => now >= tier.startDate && now <= tier.endDate)?.amount;
+    const fallbackTierAmount = season.pricingTiers[season.pricingTiers.length - 1]?.amount || registrationForm?.baseFee || 150;
+    const baseAmount = activeTierAmount || fallbackTierAmount;
 
-    // Apply pro-rating for mid-season registrations
-    const proRatedAmount = calculateProRatedFee(baseAmount, season.startDate, season.endDate);
-    let amount = proRatedAmount;
+    let amount = calculateProRatedFee(baseAmount, season.startDate, season.endDate);
+    const discount = await applyDiscountCode(seasonId, discountCode, amount);
+    amount = discount.amount;
 
-    // Add note if mid-season
-    const totalDays = season.endDate 
-      ? Math.ceil((season.endDate.getTime() - season.startDate.getTime()) / (1000 * 60 * 60 * 24))
-      : 0;
-    const daysRemaining = season.endDate
-      ? Math.ceil((season.endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-      : 0;
-    const isMidSeason = totalDays > 0 && daysRemaining < totalDays * 0.5;
-
-    // Determine insurance status
     let insuranceStatus = 'VALID';
     if (!insurance) {
-      insuranceStatus = 'REQUIRED'; // Hard gate - insurance required
-      amount += 50; // Add insurance cost
+      insuranceStatus = 'REQUIRED';
+      amount += 50;
     } else if (insurance.endDate <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)) {
-      insuranceStatus = 'EXPIRING_SOON'; // Flag for renewal soon
-    }
-
-    // Check for existing registration
-    const existing = await prisma.registration.findUnique({
-      where: {
-        userId_seasonId: { userId, seasonId },
-      },
-    });
-
-    if (existing) {
-      return NextResponse.json({ error: 'Already registered for this season' }, { status: 400 });
+      insuranceStatus = 'EXPIRING_SOON';
     }
 
     const registration = await prisma.registration.create({
@@ -133,26 +140,42 @@ export async function POST(request: NextRequest) {
         seasonId,
         amount,
         insuranceStatus,
-        status: 'PENDING',
-        // Waiver acceptance
+        status: amount <= 0 ? 'APPROVED' : 'PENDING',
+        paid: amount <= 0,
+        paymentId: amount <= 0 ? 'NO_PAYMENT_REQUIRED' : null,
         waiverSignedAt: waiverAgreed ? new Date() : null,
         waiverIpAddress: waiverAgreed ? ipAddress : null,
       },
+      include: { season: true },
     });
 
-    // Auto-approve if insurance is valid (no payment needed for now - Stripe stub)
-    if (insuranceStatus === 'VALID') {
-      await prisma.registration.update({
-        where: { id: registration.id },
-        data: { status: 'APPROVED', paid: true },
+    if (discount.discountCodeId) {
+      await prisma.discountCode.update({
+        where: { id: discount.discountCodeId },
+        data: { currentUses: { increment: 1 } },
       });
     }
 
-    return NextResponse.json(registration);
+    if (amount <= 0) {
+      await prisma.ledger.create({
+        data: {
+          userId,
+          amount: 0,
+          type: 'REGISTRATION',
+          status: 'COMPLETED',
+          year: new Date().getFullYear(),
+          description: `Registration completed for ${season.name}${discount.discountAmount ? ` with discount ${discountCode}` : ''}`,
+        },
+      });
+    }
+
+    return NextResponse.json({
+      ...registration,
+      discountAmount: discount.discountAmount,
+    });
   } catch (error) {
     console.error('Error creating registration:', error);
-    return NextResponse.json({ error: 'Failed to create registration' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Failed to create registration';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-
-

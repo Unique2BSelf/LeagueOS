@@ -1,8 +1,9 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { useSessionUser } from '@/hooks/use-session-user'
 import { Plus, Calendar, Settings, Users, Trash2, Edit, Loader2, Check, X, FileText } from 'lucide-react'
 
 interface Season {
@@ -21,7 +22,7 @@ interface Season {
 
 export default function SeasonsPage() {
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
+  const { user, loading: userLoading } = useSessionUser()
   const [loading, setLoading] = useState(true)
   const [seasons, setSeasons] = useState<Season[]>([])
   const [showForm, setShowForm] = useState(false)
@@ -37,17 +38,17 @@ export default function SeasonsPage() {
   })
 
   useEffect(() => {
-    const stored = localStorage.getItem('league_user')
-    if (stored) {
-      const userData = JSON.parse(stored)
-      setUser(userData)
-      if (userData.role !== 'ADMIN' && userData.role !== 'CAPTAIN') {
-        // Redirect or show error
-      }
-      fetchSeasons()
+    if (userLoading) {
+      return
     }
-    setLoading(false)
-  }, [])
+
+    if (!user) {
+      setLoading(false)
+      return
+    }
+
+    fetchSeasons().finally(() => setLoading(false))
+  }, [user, userLoading])
 
   const fetchSeasons = async () => {
     try {
@@ -319,3 +320,4 @@ export default function SeasonsPage() {
     </div>
   )
 }
+

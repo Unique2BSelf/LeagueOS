@@ -1,7 +1,8 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { useSessionUser } from '@/hooks/use-session-user'
 import { 
   Users, Check, X, Loader2, Search, 
   CheckCircle, XCircle, Clock, Shield, Palette
@@ -28,7 +29,7 @@ interface Team {
 
 export default function TeamApprovalPage() {
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
+  const { user, loading: userLoading } = useSessionUser()
   const [loading, setLoading] = useState(true)
   const [teams, setTeams] = useState<Team[]>([])
   const [filteredTeams, setFilteredTeams] = useState<Team[]>([])
@@ -41,20 +42,24 @@ export default function TeamApprovalPage() {
   const [pendingAction, setPendingAction] = useState<{ ids: string[], action: string } | null>(null)
 
   useEffect(() => {
-    const stored = localStorage.getItem('league_user')
-    if (stored) {
-      const userData = JSON.parse(stored)
-      setUser(userData)
-      if (userData.role !== 'ADMIN') {
-        router.push('/dashboard')
-        return
-      }
-      fetchTeams()
-    } else {
-      router.push('/login')
+    if (userLoading) {
+      return
     }
-    setLoading(false)
-  }, [])
+
+    if (!user) {
+      router.push('/login')
+      setLoading(false)
+      return
+    }
+
+    if (user.role !== 'ADMIN') {
+      router.push('/dashboard')
+      setLoading(false)
+      return
+    }
+
+    fetchTeams().finally(() => setLoading(false))
+  }, [user, userLoading, router])
 
   const fetchTeams = async () => {
     try {
@@ -374,3 +379,4 @@ export default function TeamApprovalPage() {
     </div>
   )
 }
+

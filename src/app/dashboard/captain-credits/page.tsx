@@ -1,8 +1,9 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { useSessionUser } from '@/hooks/use-session-user'
 import { 
   CreditCard, Plus, Search, Loader2, Gift, Users
 } from 'lucide-react'
@@ -23,7 +24,7 @@ interface Team {
 
 export default function CaptainCreditsPage() {
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
+  const { user, loading: userLoading } = useSessionUser()
   const [loading, setLoading] = useState(true)
   const [teams, setTeams] = useState<Team[]>([])
   const [searchTerm, setSearchTerm] = useState('')
@@ -33,16 +34,22 @@ export default function CaptainCreditsPage() {
   const [adding, setAdding] = useState(false)
 
   useEffect(() => {
-    const stored = localStorage.getItem('league_user')
-    if (stored) {
-      const userData = JSON.parse(stored)
-      setUser(userData)
-      if (userData.role === 'ADMIN') {
-        fetchTeams()
-      }
+    if (userLoading) {
+      return
     }
+
+    if (!user) {
+      setLoading(false)
+      return
+    }
+
+    if (user.role === 'ADMIN') {
+      fetchTeams().finally(() => setLoading(false))
+      return
+    }
+
     setLoading(false)
-  }, [])
+  }, [user, userLoading])
 
   const fetchTeams = async () => {
     try {
@@ -255,3 +262,4 @@ export default function CaptainCreditsPage() {
     </div>
   )
 }
+
