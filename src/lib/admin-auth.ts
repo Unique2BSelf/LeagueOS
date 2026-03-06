@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSessionFromRequest } from '@/lib/auth';
 
 export type AdminActor = {
   id: string;
@@ -9,13 +10,13 @@ export type AdminActor = {
 };
 
 export async function getAdminActor(request: NextRequest): Promise<AdminActor | null> {
-  const userId = request.headers.get('x-user-id');
-  if (!userId) {
+  const session = await getSessionFromRequest(request);
+  if (!session) {
     return null;
   }
 
   const actor = await prisma.user.findUnique({
-    where: { id: userId },
+    where: { id: session.userId },
     select: {
       id: true,
       email: true,
