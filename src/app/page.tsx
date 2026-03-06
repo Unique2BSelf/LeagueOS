@@ -141,7 +141,7 @@ export default function Home() {
                   Get Started Free
                 </Link>
                 <Link href="/schedule" className="btn-secondary text-lg px-8 py-4">
-                  View Demo Schedule
+                  View Schedule
                 </Link>
               </div>
             </div>
