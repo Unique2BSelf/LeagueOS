@@ -1,151 +1,254 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
 
-interface ChatMessage {
+interface ChatRoom {
   id: string;
-  roomId: string;
-  userId: string;
-  userName: string;
-  userRole: string;
-  message: string;
-  timestamp: string;
-  isDeleted?: boolean;
-  isReported?: boolean;
+  name: string;
+  type: 'global' | 'division' | 'team' | 'direct';
 }
 
-const roomTypes = ['global', 'division', 'team', '1-1'];
-const messages: Map<string, ChatMessage[]> = new Map();
-
-function initDemoMessages() {
-  if (messages.has('global')) {
-    return;
+function titleizeRoom(channel: string): string {
+  if (channel === 'global') {
+    return 'General';
   }
 
-  messages.set('global', [
-    {
-      id: '1',
-      roomId: 'global',
-      userId: 'admin-1',
-      userName: 'League Admin',
-      userRole: 'ADMIN',
-      message: 'Welcome to League OS Chat! Be respectful and have fun.',
-      timestamp: new Date(Date.now() - 3600000).toISOString(),
-    },
-    {
-      id: '2',
-      roomId: 'global',
-      userId: 'player-1',
-      userName: 'John Player',
-      userRole: 'PLAYER',
-      message: 'Hey everyone! Ready for the weekend games?',
-      timestamp: new Date(Date.now() - 1800000).toISOString(),
-    },
-  ]);
+  if (channel.startsWith('division-')) {
+    return channel.replace('division-', '').replace(/-/g, ' ');
+  }
+
+  if (channel.startsWith('team-')) {
+    return channel.replace('team-', '').replace(/-/g, ' ');
+  }
+
+  if (channel.startsWith('direct-')) {
+    return 'Direct Message';
+  }
+
+  return channel;
 }
 
-initDemoMessages();
+async function getUserRooms(userId: string, userRole: string): Promise<ChatRoom[]> {
+  const rooms = new Map<string, ChatRoom>();
+  rooms.set('global', { id: 'global', name: 'General', type: 'global' });
+
+  const memberships = await prisma.teamPlayer.findMany({
+    where: {
+      userId,
+      status: 'APPROVED',
+    },
+    include: {
+      team: {
+        include: {
+          division: true,
+        },
+      },
+    },
+  });
+
+  for (const membership of memberships) {
+    rooms.set(`team-${membership.team.id}`, {
+      id: `team-${membership.team.id}`,
+      name: membership.team.name,
+      type: 'team',
+    });
+
+    if (membership.team.division) {
+      rooms.set(`division-${membership.team.division.id}`, {
+        id: `division-${membership.team.division.id}`,
+        name: membership.team.division.name,
+        type: 'division',
+      });
+    }
+  }
+
+  if (userRole === 'ADMIN' || userRole === 'MODERATOR') {
+    rooms.set('direct-captains', {
+      id: 'direct-captains',
+      name: 'Captains',
+      type: 'direct',
+    });
+  }
+
+  return Array.from(rooms.values());
+}
+
+function canAccessRoom(roomId: string, rooms: ChatRoom[]): boolean {
+  return rooms.some((room) => room.id === roomId);
+}
 
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const roomId = searchParams.get('roomId') || searchParams.get('channel') || 'global';
-  const limit = parseInt(searchParams.get('limit') || '50', 10);
-  const roomMessages = messages.get(roomId) || [];
+  try {
+    const userId = request.headers.get('x-user-id');
+    const userRole = request.headers.get('x-user-role') || 'PLAYER';
 
-  return NextResponse.json({
-    messages: roomMessages.slice(-limit),
-    roomId,
-    roomTypes,
-  });
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const rooms = await getUserRooms(userId, userRole);
+    const { searchParams } = new URL(request.url);
+    const requestedRoomId = searchParams.get('roomId') || 'global';
+    const roomId = canAccessRoom(requestedRoomId, rooms) ? requestedRoomId : 'global';
+    const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 100);
+
+    const messages = await prisma.message.findMany({
+      where: {
+        channel: roomId,
+        isDeleted: false,
+      },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+      include: {
+        user: {
+          select: {
+            fullName: true,
+            role: true,
+          },
+        },
+      },
+    });
+
+    return NextResponse.json({
+      roomId,
+      rooms,
+      messages: messages.map((message) => ({
+        id: message.id,
+        roomId: message.channel,
+        userId: message.userId,
+        userName: message.user.fullName,
+        userRole: message.user.role,
+        message: message.content,
+        timestamp: message.createdAt.toISOString(),
+      })),
+    });
+  } catch (error) {
+    console.error('Chat GET error:', error);
+    return NextResponse.json({ error: 'Failed to load chat' }, { status: 500 });
+  }
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const userId = request.headers.get('x-user-id');
+    const userRole = request.headers.get('x-user-role') || 'PLAYER';
+
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const rooms = await getUserRooms(userId, userRole);
     const body = await request.json();
-    const roomId = body.roomId || body.channel || 'global';
-    const userId = body.userId;
-    const userName = body.userName || 'Anonymous';
-    const userRole = body.userRole || 'PLAYER';
-    const message = body.message || body.content;
+    const roomId = typeof body?.roomId === 'string' ? body.roomId : 'global';
+    const message = typeof body?.message === 'string' ? body.message.trim() : '';
 
-    if (!userId || !message) {
-      return NextResponse.json({ error: 'userId and message are required' }, { status: 400 });
+    if (!message) {
+      return NextResponse.json({ error: 'Message is required' }, { status: 400 });
     }
 
-    const chatMessage: ChatMessage = {
-      id: Date.now().toString(),
-      roomId,
-      userId,
-      userName,
-      userRole,
-      message,
-      timestamp: new Date().toISOString(),
-    };
-
-    if (!messages.has(roomId)) {
-      messages.set(roomId, []);
+    if (!canAccessRoom(roomId, rooms)) {
+      return NextResponse.json({ error: 'Forbidden room' }, { status: 403 });
     }
 
-    messages.get(roomId)!.push(chatMessage);
-    return NextResponse.json(chatMessage, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    const created = await prisma.message.create({
+      data: {
+        channel: roomId,
+        userId,
+        content: message,
+      },
+      include: {
+        user: {
+          select: {
+            fullName: true,
+            role: true,
+          },
+        },
+      },
+    });
+
+    return NextResponse.json({
+      id: created.id,
+      roomId: created.channel,
+      userId: created.userId,
+      userName: created.user.fullName,
+      userRole: created.user.role,
+      message: created.content,
+      timestamp: created.createdAt.toISOString(),
+    }, { status: 201 });
+  } catch (error) {
+    console.error('Chat POST error:', error);
+    return NextResponse.json({ error: 'Failed to send message' }, { status: 500 });
   }
 }
 
 export async function PATCH(request: NextRequest) {
   try {
+    const userId = request.headers.get('x-user-id');
+    const userRole = request.headers.get('x-user-role') || 'PLAYER';
+
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
-    const { messageId, action, userId, userRole } = body;
+    const messageId = typeof body?.messageId === 'string' ? body.messageId : '';
+    const action = typeof body?.action === 'string' ? body.action : '';
 
     if (!messageId || !action) {
       return NextResponse.json({ error: 'messageId and action are required' }, { status: 400 });
     }
 
-    for (const roomMessages of messages.values()) {
-      const idx = roomMessages.findIndex((message) => message.id === messageId);
-      if (idx < 0) {
-        continue;
+    const existing = await prisma.message.findUnique({
+      where: { id: messageId },
+      include: {
+        user: {
+          select: { role: true },
+        },
+      },
+    });
+
+    if (!existing) {
+      return NextResponse.json({ error: 'Message not found' }, { status: 404 });
+    }
+
+    const canModerate = existing.userId === userId || ['ADMIN', 'MODERATOR'].includes(userRole);
+    if (action === 'delete') {
+      if (!canModerate) {
+        return NextResponse.json({ error: 'Unauthorized to delete this message' }, { status: 403 });
       }
 
-      const existing = roomMessages[idx];
-      const canModerate = existing.userId === userId || ['ADMIN', 'MODERATOR'].includes(userRole || '');
-
-      if (action === 'delete') {
-        if (!canModerate) {
-          return NextResponse.json({ error: 'Unauthorized to delete this message' }, { status: 403 });
-        }
-        roomMessages.splice(idx, 1);
-      } else if (action === 'report') {
-        existing.isReported = true;
-      } else if (action === 'mute') {
-        if (!['ADMIN', 'MODERATOR'].includes(userRole || '')) {
-          return NextResponse.json({ error: 'Admin only' }, { status: 403 });
-        }
-        return NextResponse.json({ success: true, message: 'User muted', mutedUserId: existing.userId });
-      }
+      await prisma.message.update({
+        where: { id: messageId },
+        data: { isDeleted: true },
+      });
 
       return NextResponse.json({ success: true, action, messageId });
     }
 
-    return NextResponse.json({ error: 'Message not found' }, { status: 404 });
-  } catch {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    if (action === 'list-rooms') {
+      const rooms = await getUserRooms(userId, userRole);
+      return NextResponse.json({ rooms });
+    }
+
+    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+  } catch (error) {
+    console.error('Chat PATCH error:', error);
+    return NextResponse.json({ error: 'Failed to update message' }, { status: 500 });
   }
 }
 
 export async function PUT(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const action = searchParams.get('action');
+  const userId = request.headers.get('x-user-id');
+  const userRole = request.headers.get('x-user-role') || 'PLAYER';
 
-  if (action === 'list-rooms') {
-    return NextResponse.json({
-      rooms: Array.from(messages.keys()).map((roomId) => ({
-        id: roomId,
-        name: roomId,
-        messageCount: messages.get(roomId)?.length || 0,
-      })),
-    });
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+  const rooms = await getUserRooms(userId, userRole);
+  return NextResponse.json({
+    rooms: rooms.map((room) => ({
+      ...room,
+      label: room.name || titleizeRoom(room.id),
+    })),
+  });
 }
-

@@ -1,4 +1,4 @@
-﻿import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { buildSessionResponse, toPublicUser } from '@/lib/auth';
 import { hashPassword } from '@/lib/password';
@@ -10,7 +10,6 @@ export async function POST(req: Request) {
       email,
       password,
       photoUrl,
-      role,
       skillSpeed,
       skillTechnical,
       skillStamina,
@@ -43,7 +42,7 @@ export async function POST(req: Request) {
         email: normalizedEmail,
         password: await hashPassword(password),
         photoUrl,
-        role: role || 'PLAYER',
+        role: 'PLAYER',
         isInsured: false,
         eloRating: 1200,
         isGoalie: Boolean(isGoalie),
@@ -66,4 +65,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-
