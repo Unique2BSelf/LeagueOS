@@ -16,6 +16,12 @@ enum Role {
   SPONSOR
 }
 
+enum MatchType {
+  REGULAR
+  FRIENDLY
+  BYE
+}
+
 enum MatchStatus {
   SCHEDULED
   LIVE
@@ -89,12 +95,17 @@ model Team {
   primaryColor      String
   secondaryColor   String
   jerseyPhotoUrl    String?
+  jerseyColor       String?
+  jerseyPattern     String?
+  logoUrl           String?
+  sponsorLogos      String[]
   escrowTarget      Float
   currentBalance    Float               @default(0)
   isConfirmed       Boolean             @default(false)
   approvalStatus    String              @default("PENDING") // PENDING, APPROVED, REJECTED
   rejectionReason   String?             // Reason if rejected
   subQuotaRemaining Int                 @default(10)
+  blackoutDates    String[]             // Dates team cannot play
   sponsorId         String?
   seasonId          String
   // Invite code for players to join
@@ -133,6 +144,8 @@ model Match {
   homeScore         Int?
   awayScore         Int?
   status            MatchStatus         @default(SCHEDULED)
+  matchType         MatchType           @default(REGULAR)
+  gameLengthMinutes Int                 @default(60)
   checklistDone     Boolean             @default(false)
   streamLink        String?
   weatherStatus     String?
@@ -141,6 +154,7 @@ model Match {
   homeTeam          Team                @relation("Home", fields: [homeTeamId], references: [id])
   awayTeam          Team                @relation("Away", fields: [awayTeamId], references: [id])
   ref               User?               @relation("MatchRef", fields: [refId], references: [id])
+  field             Field?              @relation(fields: [fieldId], references: [id])
   subs              Sub[]
   disciplinary      DisciplinaryAction[]
   season            Season              @relation(fields: [seasonId], references: [id])
@@ -218,6 +232,7 @@ model Field {
 
   location      Location            @relation(fields: [locationId], references: [id])
   maintenance   MaintenanceLog[]
+  matches       Match[]
 }
 
 model Season {

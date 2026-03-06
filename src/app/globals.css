@@ -313,3 +313,128 @@ a:hover {
   color: var(--accent);
   background: rgba(0, 245, 255, 0.1);
 }
+
+/* Dark Dropdown Styles */
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+select option {
+  background: #1a1a2e;
+  color: #ffffff;
+  padding: 12px;
+}
+
+/* Ensure dropdown menus are dark */
+select option:hover,
+select option:focus,
+select option:checked {
+  background: #2a2a4e !important;
+  color: #00F5FF;
+}
+
+/* Force dark select/dropdown - higher specificity */
+body select,
+.glass-card select,
+div select,
+select.form-select,
+select.input,
+.w-full select {
+  background-color: #1a1a2e !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M6 8L1 3h10z'/%3E%3C/svg%3E") !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255,255,255,0.2) !important;
+}
+
+select option {
+  background-color: #1a1a2e !important;
+  color: #ffffff !important;
+}
+
+select option:hover,
+select option:checked {
+  background-color: #2a2a4e !important;
+  color: #00F5FF !important;
+}
+
+/* Navigation Dropdown Dark Theme */
+.nav-dropdown,
+.absolute.top-full,
+.group-hover\:opacity-100 {
+  background-color: #0d0d1a !important;
+}
+
+.group-hover a:hover,
+.group-hover button:hover,
+.absolute.top-full a:hover,
+.absolute.top-full button:hover,
+.nav-dropdown-item:hover,
+.dropdown-item:hover {
+  background-color: #1a1a2e !important;
+  color: #00F5FF !important;
+}
+
+/* Nav link text */
+.nav-link,
+button.nav-link,
+.nav-dropdown a,
+.nav-dropdown button {
+  color: #e0e0e0 !important;
+}
+
+/* Active nav item */
+.nav-dropdown a.active,
+.nav-dropdown button.active {
+  color: #00F5FF !important;
+  background-color: rgba(0, 245, 255, 0.1) !important;
+}
+
+/* Navigation Dropdown - make background darker/more transparent */
+.absolute.top-full.left-0,
+.group-hover\.opacity-100,
+nav .absolute {
+  background-color: rgba(13, 13, 26, 0.95) !important;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 245, 255, 0.2);
+}
+
+.absolute.top-full.left-0 a,
+.absolute.top-full.left-0 button {
+  color: #e0e0e0 !important;
+  opacity: 1 !important;
+}
+
+/* Navigation Dropdown - readable dark background */
+.absolute.top-full.left-0,
+.group-hover\.opacity-100,
+nav .absolute {
+  background-color: #1a1a2e !important;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.absolute.top-full.left-0 a,
+.absolute.top-full.left-0 button {
+  color: #ffffff !important;
+}
+
+/* Override glass-card for nav dropdown - make it darker/solid */
+header .glass-card,
+nav .glass-card,
+div.group .glass-card {
+  background: #121212 !important;
+  background-color: #121212 !important;
+  opacity: 1 !important;
+}
+
+/* Fix nav dropdown glass-card - darker readable background */
+nav .group .glass-card,
+header + nav .glass-card,
+div.group > div.glass-card {
+  background: rgba(18, 18, 18, 0.95) !important;
+  backdrop-filter: none !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}

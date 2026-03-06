@@ -87,7 +87,7 @@ export default function RegisterPage() {
   }
 
   const handlePhotoCapture = (photoData: string) => {
-    setFormData((prev) => ({ ...prev, photoUrl: photoData }))
+    setFormData((prev) => ({ ...prev, photoUrl: photoData, photoVerified: true }))
   }
   const handlePhotoVerified = (verified: boolean) => {
     setFormData((prev) => ({ ...prev, photoVerified: verified }))

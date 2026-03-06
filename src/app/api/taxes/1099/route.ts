@@ -1,188 +1,148 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
 
-/**
- * 1099-NEC Engine per PRD:
- * - Track Ledger where type = REF_PAYOUT && year = currentYear
- * - Nightly cron: if SUM(amount) >= 2000 → flag user
- * - Jan 1: generate PDF (Copy B for ref, Copy A for league)
- * - TaxIdEncrypted decrypted only during PDF generation (server-side)
- * - Store PDFs in MinIO/S3 with signed download URLs
- */
-
-// Mock ledger data - in production, query from Prisma
-const mockLedger: Array<{
-  id: string;
-  userId: string;
-  amount: number;
-  type: string;
-  year: number;
-  description?: string;
-  createdAt: Date;
-}> = [
-  { id: '1', userId: 'ref-1', amount: 75, type: 'REF_PAYOUT', year: 2026, description: 'Match #101', createdAt: new Date('2026-01-15') },
-  { id: '2', userId: 'ref-1', amount: 75, type: 'REF_PAYOUT', year: 2026, description: 'Match #102', createdAt: new Date('2026-01-22') },
-  { id: '3', userId: 'ref-1', amount: 60, type: 'REF_PAYOUT', year: 2026, description: 'Match #103', createdAt: new Date('2026-02-01') },
-  { id: '4', userId: 'ref-1', amount: 90, type: 'REF_PAYOUT', year: 2026, description: 'Match #104', createdAt: new Date('2026-02-15') },
-  { id: '5', userId: 'ref-1', amount: 75, type: 'REF_PAYOUT', year: 2026, description: 'Match #105', createdAt: new Date('2026-02-22') },
-  { id: '6', userId: 'ref-1', amount: 75, type: 'REF_PAYOUT', year: 2026, description: 'Match #106', createdAt: new Date('2026-03-01') },
-  { id: '7', userId: 'ref-1', amount: 2500, type: 'REF_PAYOUT', year: 2025, description: 'Season total', createdAt: new Date('2025-12-15') },
-];
-
-const mockUsers: Record<string, any> = {
-  'ref-1': {
-    id: 'ref-1',
-    fullName: 'John Smith',
-    email: 'john.referee@email.com',
-    taxIdEncrypted: 'aGVsbG9fd29ybGRfZW5jcnlwdGVk', // "hello_world_encrypted" base64
-    address: '123 Soccer Ave, City, ST 12345',
-  },
-  'ref-2': {
-    id: 'ref-2',
-    fullName: 'Jane Doe',
-    email: 'jane.referee@email.com',
-    taxIdEncrypted: 'c2VjcmV0X3RheF9pZA==', // "secret_tax_id" base64
-    address: '456 Ref Road, Town, ST 67890',
-  },
-};
-
-// Threshold for 1099-NEC
-const THRESHOLD = 2000;
-
-function decryptTaxId(encrypted: string): string {
-  // In production: AES-256 decryption with server-side key
-  // This is a placeholder - real implementation would use crypto module
-  return `***-**-${encrypted.slice(-4)}`;
-}
-
+// Generate 1099-NEC PDF data for referees
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const userId = searchParams.get('userId');
-  const year = searchParams.get('year') || new Date().getFullYear().toString();
-  const format = searchParams.get('format') || 'json';
-  
+  const userId = request.headers.get('x-user-id');
   if (!userId) {
-    // Return all refs with payout totals for the year
-    const yearNum = parseInt(year);
-    const payoutsByRef = mockLedger
-      .filter(l => l.type === 'REF_PAYOUT' && l.year === yearNum)
-      .reduce((acc, l) => {
-        if (!acc[l.userId]) acc[l.userId] = 0;
-        acc[l.userId] += l.amount;
-        return acc;
-      }, {} as Record<string, number>);
-    
-    const refsWithTotals = Object.entries(payoutsByRef).map(([refId, total]) => ({
-      userId: refId,
-      totalPayout: total,
-      eligibleFor1099: total >= THRESHOLD,
-      THRESHOLD,
-    }));
-    
-    return NextResponse.json({
-      year,
-      refs: refsWithTotals,
-      generatedAt: new Date().toISOString(),
-    });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  
-  const user = mockUsers[userId];
-  if (!user) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 });
-  }
-  
-  const yearNum = parseInt(year);
-  const userPayouts = mockLedger.filter(
-    l => l.userId === userId && l.type === 'REF_PAYOUT' && l.year === yearNum
-  );
-  
-  const totalPayout = userPayouts.reduce((sum, l) => sum + l.amount, 0);
-  
-  if (format === 'pdf') {
-    // In production: Generate actual PDF with PDFKit
-    // For now, return metadata needed for PDF generation
-    const taxId = decryptTaxId(user.taxIdEncrypted);
-    
-    return NextResponse.json({
-      message: 'PDF generation endpoint - would use PDFKit in production',
-      pdfData: {
-        formType: '1099-NEC',
-        taxYear: year,
-        // Payer info
-        payer: {
-          name: 'Pathfinder Adult Soccer League',
-          address: 'PO Box 123, City, ST 12345',
-          ein: 'XX-XXXXXXX',
-        },
-        // Recipient info
-        recipient: {
-          name: user.fullName,
-          address: user.address,
-          tin: taxId,
-          email: user.email,
-        },
-        // Amount
-        nonemployeeCompensation: totalPayout,
-        // Flags
-        isCorrection: false,
-        // Copy info
-        copy: 'B', // Copy B - to be sent to recipient
-      },
-    });
-  }
-  
-  return NextResponse.json({
-    userId,
-    year,
-    payouts: userPayouts,
-    totalPayout,
-    eligibleFor1099: totalPayout >= THRESHOLD,
-    threshold: THRESHOLD,
-    taxIdLast4: decryptTaxId(user.taxIdEncrypted).slice(-4),
-    generatedAt: new Date().toISOString(),
-  });
-}
 
-export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { userId, year, action } = body;
-    
-    if (!userId || !year) {
-      return NextResponse.json(
-        { error: 'userId and year are required' },
-        { status: 400 }
-      );
-    }
-    
-    const user = mockUsers[userId];
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
+
+    // Get all ref payouts for the year
+    const year = new Date().getFullYear();
+    const matches = await prisma.match.findMany({
+      where: {
+        refId: userId,
+        status: 'FINAL',
+        scheduledAt: {
+          gte: new Date(`${year}-01-01`),
+          lte: new Date(`${year}-12-31`),
+        },
+      },
+      include: { season: true },
+    });
+
+    const rates: Record<string, number> = {
+      'Premier': 75,
+      'Compete': 60,
+      'Recreational': 45,
+    };
+
+    let totalEarnings = 0;
+    const payments = matches.map(m => {
+      const rate = rates[m.season?.name || 'Recreational'] || 45;
+      totalEarnings += rate;
+      return {
+        date: m.scheduledAt,
+        amount: rate,
+        description: `Referee services - ${m.season?.name || 'Recreational'}`,
+      };
+    });
+
+    // Generate 1099 data
+    const is1099Required = totalEarnings >= 600;
     
-    if (action === 'generate') {
-      // Generate PDF - in production, use PDFKit or similar
-      return NextResponse.json({
-        success: true,
-        message: '1099-NEC PDF generated successfully',
-        downloadUrl: `/api/taxes/1099/download?userId=${userId}&year=${year}`,
-        generatedAt: new Date().toISOString(),
-      });
-    }
-    
-    if (action === 'mark-sent') {
-      // Mark 1099 as sent to recipient
-      return NextResponse.json({
-        success: true,
-        message: '1099-NEC marked as sent',
-        sentAt: new Date().toISOString(),
-      });
-    }
-    
-    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+    // In production, this would generate an actual PDF
+    // For now, return the data structure
+    const taxData = {
+      // Form 1099-NEC fields
+      recipientName: user.fullName,
+      recipientTIN: user.taxIdEncrypted || 'XXX-XX-XXXX', // Would decrypt in production
+      recipientAddress: '', // Would need to add address field
+      recipientEmail: user.email,
+      
+      // Payer info (league info)
+      payerName: 'Pathfinder Outdoor Soccer League',
+      payerTIN: 'XX-XXXXXXX',
+      
+      // Amount
+      totalNonemployeeCompensation: totalEarnings,
+      is1099Required,
+      
+      // Year
+      taxYear: year,
+      
+      // Payments detail
+      payments,
+      
+      // Status
+      generatedAt: new Date().toISOString(),
+    };
+
+    return NextResponse.json(taxData);
   } catch (error) {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Error generating 1099:', error);
+    return NextResponse.json({ error: 'Failed to generate 1099' }, { status: 500 });
+  }
+}
+
+// Admin: Generate 1099 for any referee
+export async function POST(request: NextRequest) {
+  const userId = request.headers.get('x-user-id');
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Verify admin
+  const admin = await prisma.user.findUnique({ where: { id: userId } });
+  if (!admin || admin.role !== 'ADMIN') {
+    return NextResponse.json({ error: 'Admin only' }, { status: 403 });
+  }
+
+  try {
+    const { targetUserId, taxYear } = await request.json();
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id: targetUserId },
+    });
+
+    if (!targetUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    const matches = await prisma.match.findMany({
+      where: {
+        refId: targetUserId,
+        status: 'FINAL',
+        scheduledAt: {
+          gte: new Date(`${taxYear}-01-01`),
+          lte: new Date(`${taxYear}-12-31`),
+        },
+      },
+      include: { season: true },
+    });
+
+    const rates: Record<string, number> = {
+      'Premier': 75,
+      'Compete': 60,
+      'Recreational': 45,
+    };
+
+    const totalEarnings = matches.reduce((sum, m) => 
+      sum + (rates[m.season?.name || 'Recreational'] || 45), 0);
+
+    return NextResponse.json({
+      recipientName: targetUser.fullName,
+      recipientEmail: targetUser.email,
+      taxYear,
+      totalEarnings,
+      is1099Required: totalEarnings >= 600,
+      gamesWorked: matches.length,
+      message: totalEarnings >= 600 
+        ? '1099-NEC required - generate and send to recipient'
+        : 'Amount below $600 threshold - no 1099 required',
+    });
+  } catch (error) {
+    console.error('Error:', error);
+    return NextResponse.json({ error: 'Failed to generate report' }, { status: 500 });
   }
 }
