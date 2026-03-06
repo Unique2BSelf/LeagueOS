@@ -19,6 +19,14 @@ export function getStripeClient(): Stripe {
   return stripeClient;
 }
 
+export function getStripeWebhookSecret(): string {
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    throw new Error('STRIPE_WEBHOOK_SECRET is not configured');
+  }
+  return webhookSecret;
+}
+
 export function getRequestOrigin(request: Request): string {
   const forwardedProto = request.headers.get('x-forwarded-proto');
   const host = request.headers.get('host');
@@ -30,4 +38,3 @@ export function getRequestOrigin(request: Request): string {
   const url = new URL(request.url);
   return url.origin;
 }
-
