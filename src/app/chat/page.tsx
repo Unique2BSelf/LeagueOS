@@ -31,6 +31,7 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const streamRef = useRef<EventSource | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const loadMessages = async (nextRoomId = roomId) => {
@@ -57,12 +58,44 @@ export default function ChatPage() {
 
     let cancelled = false;
 
-    const refresh = async () => {
+    const boot = async () => {
       try {
-        if (!cancelled) {
-          await loadMessages();
-          setError('');
+        if (streamRef.current) {
+          streamRef.current.close();
+          streamRef.current = null;
         }
+
+        await loadMessages(roomId);
+        if (cancelled) {
+          return;
+        }
+
+        const stream = new EventSource(`/api/chat?roomId=${encodeURIComponent(roomId)}&stream=1`);
+        stream.onmessage = (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload.type === 'message_created' && payload.roomId === roomId) {
+              setMessages((current) => {
+                const next = payload.message as ChatMessage;
+                if (current.some((message) => message.id === next.id)) {
+                  return current;
+                }
+                return [...current, next];
+              });
+            }
+
+            if (payload.type === 'message_deleted' && payload.roomId === roomId) {
+              setMessages((current) => current.filter((message) => message.id !== payload.messageId));
+            }
+          } catch {
+            // Ignore malformed stream payloads.
+          }
+        };
+        stream.onerror = () => {
+          setError('Chat stream disconnected. Reloading messages.');
+        };
+        streamRef.current = stream;
+        setError('');
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load chat');
@@ -74,11 +107,13 @@ export default function ChatPage() {
       }
     };
 
-    refresh();
-    const interval = setInterval(refresh, 5000);
+    boot();
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (streamRef.current) {
+        streamRef.current.close();
+        streamRef.current = null;
+      }
     };
   }, [user, roomId]);
 

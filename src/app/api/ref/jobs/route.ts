@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
 
-/**
- * Referee Job Board API per PRD:
- * - Self-select games from job board
- * - Background check gate (must be CLEAR to claim)
- * - Certification requirement check
- * - Payout tracking
- */
+export const runtime = 'nodejs';
 
 interface RefJob {
   id: string;
@@ -23,7 +18,6 @@ interface RefJob {
   claimedAt?: string;
 }
 
-// Mock available games
 const jobs: RefJob[] = [
   { id: 'job-1', matchId: 'match-101', homeTeam: 'Thunder FC', awayTeam: 'Velocity SC', scheduledAt: '2026-03-07T10:00:00Z', field: 'Field 1', division: 'Premier', divisionLevel: 1, pay: 75, status: 'OPEN' },
   { id: 'job-2', matchId: 'match-102', homeTeam: 'Apex United', awayTeam: 'Phoenix FC', scheduledAt: '2026-03-07T10:00:00Z', field: 'Field 2', division: 'Premier', divisionLevel: 1, pay: 75, status: 'OPEN' },
@@ -33,102 +27,99 @@ const jobs: RefJob[] = [
   { id: 'job-6', matchId: 'match-106', homeTeam: 'Storm Riders', awayTeam: 'Night Hawks', scheduledAt: '2026-03-08T12:00:00Z', field: 'Field 1', division: 'Recreational', divisionLevel: 3, pay: 50, status: 'OPEN' },
 ];
 
-// Mock referee data
-interface RefProfile {
-  userId: string;
-  backgroundCheckStatus: 'CLEAR' | 'PENDING' | 'FAIL' | 'EXPIRED';
-  backgroundCheckExpiresAt?: string;
-  certificationUploaded: boolean;
-  certificationExpiry?: string;
-  totalPayouts: number;
-  gamesWorked: number;
+function getActor(request: NextRequest) {
+  const userId = request.headers.get('x-user-id');
+  const userRole = request.headers.get('x-user-role') || 'PLAYER';
+  return userId ? { userId, userRole } : null;
 }
 
-const refProfiles: Record<string, RefProfile> = {
-  'ref-1': { 
-    userId: 'ref-1', 
-    backgroundCheckStatus: 'CLEAR', 
-    backgroundCheckExpiresAt: '2027-01-01T00:00:00Z',
-    certificationUploaded: true, 
-    certificationExpiry: '2026-12-31T00:00:00Z',
-    totalPayouts: 2500,
-    gamesWorked: 32,
-  },
-  'ref-pending': { 
-    userId: 'ref-pending', 
-    backgroundCheckStatus: 'PENDING',
-    certificationUploaded: true,
-    totalPayouts: 0,
-    gamesWorked: 0,
-  },
-};
+async function getRefProfile(userId: string) {
+  const [latestBackgroundCheck, latestCertification, payoutStats] = await Promise.all([
+    prisma.backgroundCheck.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.officialCertification.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.ledger.aggregate({
+      where: { userId, type: 'REF_PAYOUT', status: 'COMPLETED' },
+      _sum: { amount: true },
+      _count: { id: true },
+    }),
+  ]);
+
+  const certificationUploaded = Boolean(
+    latestCertification &&
+      latestCertification.status === 'ACTIVE' &&
+      (!latestCertification.expiresAt || latestCertification.expiresAt > new Date())
+  );
+
+  return {
+    userId,
+    backgroundCheckStatus: latestBackgroundCheck?.status || 'NOT_INITIATED',
+    backgroundCheckExpiresAt: latestBackgroundCheck?.expiresAt?.toISOString() || null,
+    certificationUploaded,
+    certificationExpiry: latestCertification?.expiresAt?.toISOString() || null,
+    certificationType: latestCertification?.certificationType || null,
+    totalPayouts: Number(payoutStats._sum.amount || 0),
+    gamesWorked: payoutStats._count.id || 0,
+  };
+}
 
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const status = searchParams.get('status') || 'OPEN';
-  const refId = searchParams.get('refId');
-  const date = searchParams.get('date');
-  
-  let filteredJobs = [...jobs];
-  
-  // Filter by status
-  if (status !== 'all') {
-    filteredJobs = filteredJobs.filter(j => j.status === status);
+  try {
+    const actor = getActor(request);
+    const { searchParams } = new URL(request.url);
+    const status = searchParams.get('status') || 'OPEN';
+    const date = searchParams.get('date');
+
+    let filteredJobs = [...jobs];
+    if (status !== 'all') {
+      filteredJobs = filteredJobs.filter((job) => job.status === status);
+    }
+    if (date) {
+      filteredJobs = filteredJobs.filter((job) => job.scheduledAt.startsWith(date));
+    }
+
+    const stats = {
+      openJobs: jobs.filter((job) => job.status === 'OPEN').length,
+      claimedJobs: jobs.filter((job) => job.status === 'CLAIMED').length,
+      totalPayAvailable: jobs.filter((job) => job.status === 'OPEN').reduce((sum, job) => sum + job.pay, 0),
+    };
+
+    return NextResponse.json({
+      jobs: filteredJobs,
+      stats,
+      refProfile: actor ? await getRefProfile(actor.userId) : null,
+      requirements: {
+        backgroundCheck: 'Required - must be CLEAR',
+        certification: 'Required - active certification upload on file',
+      },
+    });
+  } catch (error) {
+    console.error('Ref jobs GET error:', error);
+    return NextResponse.json({ error: 'Failed to load job board' }, { status: 500 });
   }
-  
-  // Filter by date
-  if (date) {
-    filteredJobs = filteredJobs.filter(j => j.scheduledAt.startsWith(date));
-  }
-  
-  // If refId provided, include their profile info
-  let refProfile = null;
-  if (refId && refProfiles[refId]) {
-    refProfile = refProfiles[refId];
-  }
-  
-  // Get stats
-  const stats = {
-    openJobs: jobs.filter(j => j.status === 'OPEN').length,
-    claimedJobs: jobs.filter(j => j.status === 'CLAIMED').length,
-    totalPayAvailable: jobs.filter(j => j.status === 'OPEN').reduce((sum, j) => sum + j.pay, 0),
-  };
-  
-  return NextResponse.json({
-    jobs: filteredJobs,
-    stats,
-    refProfile,
-    requirements: {
-      backgroundCheck: 'Required - must be CLEAR',
-      certification: 'Required - upload certification to claim games',
-    },
-  });
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const actor = getActor(request);
+    if (!actor) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
-    const { jobId, refId, action } = body;
-    
-    if (!jobId || !refId) {
-      return NextResponse.json(
-        { error: 'jobId and refId are required' },
-        { status: 400 }
-      );
+    const { jobId, action } = body;
+    if (!jobId) {
+      return NextResponse.json({ error: 'jobId is required' }, { status: 400 });
     }
-    
-    // Get ref profile
-    const profile = refProfiles[refId];
-    
-    if (!profile) {
-      return NextResponse.json(
-        { error: 'Ref profile not found' },
-        { status: 404 }
-      );
-    }
-    
+
+    const profile = await getRefProfile(actor.userId);
+
     if (action === 'claim') {
-      // Check requirements per PRD
       if (profile.backgroundCheckStatus !== 'CLEAR') {
         return NextResponse.json({
           error: 'Background check must be CLEAR to claim games',
@@ -136,108 +127,83 @@ export async function POST(request: NextRequest) {
           currentStatus: profile.backgroundCheckStatus,
         }, { status: 403 });
       }
-      
+
       if (!profile.certificationUploaded) {
         return NextResponse.json({
           error: 'Certification must be uploaded to claim games',
           code: 'CERTIFICATION_REQUIRED',
         }, { status: 403 });
       }
-      
-      // Find and claim job
-      const job = jobs.find(j => j.id === jobId);
+
+      const job = jobs.find((entry) => entry.id === jobId);
       if (!job) {
-        return NextResponse.json(
-          { error: 'Job not found' },
-          { status: 404 }
-        );
+        return NextResponse.json({ error: 'Job not found' }, { status: 404 });
       }
-      
       if (job.status !== 'OPEN') {
-        return NextResponse.json(
-          { error: 'Job is no longer available' },
-          { status: 409 }
-        );
+        return NextResponse.json({ error: 'Job is no longer available' }, { status: 409 });
       }
-      
-      // Claim the job
+
       job.status = 'CLAIMED';
-      job.claimedBy = refId;
+      job.claimedBy = actor.userId;
       job.claimedAt = new Date().toISOString();
-      
+
       return NextResponse.json({
         success: true,
         job,
         message: `Successfully claimed ${job.homeTeam} vs ${job.awayTeam}`,
       });
     }
-    
+
     if (action === 'release') {
-      const job = jobs.find(j => j.id === jobId);
+      const job = jobs.find((entry) => entry.id === jobId);
       if (!job) {
         return NextResponse.json({ error: 'Job not found' }, { status: 404 });
       }
-      
-      if (job.claimedBy !== refId) {
-        return NextResponse.json(
-          { error: 'You did not claim this job' },
-          { status: 403 }
-        );
+      if (job.claimedBy !== actor.userId && !['ADMIN', 'MODERATOR'].includes(actor.userRole)) {
+        return NextResponse.json({ error: 'You did not claim this job' }, { status: 403 });
       }
-      
+
       job.status = 'OPEN';
       job.claimedBy = undefined;
       job.claimedAt = undefined;
-      
+
       return NextResponse.json({
         success: true,
         job,
         message: 'Job released back to pool',
       });
     }
-    
+
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   } catch (error) {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Ref jobs POST error:', error);
+    return NextResponse.json({ error: 'Failed to update job' }, { status: 500 });
   }
 }
 
-// Get ref stats
 export async function PUT(request: NextRequest) {
-  const body = await request.json();
-  const { refId } = body;
-  
-  if (!refId) {
-    return NextResponse.json({ error: 'refId required' }, { status: 400 });
+  try {
+    const actor = getActor(request);
+    if (!actor) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const profile = await getRefProfile(actor.userId);
+    const myJobs = jobs.filter((job) => job.claimedBy === actor.userId);
+    const pendingPayout = myJobs.filter((job) => job.status === 'CLAIMED').reduce((sum, job) => sum + job.pay, 0);
+    const completedPayout = myJobs.filter((job) => job.status === 'COMPLETED').reduce((sum, job) => sum + job.pay, 0);
+
+    return NextResponse.json({
+      profile,
+      myJobs,
+      earnings: {
+        pending: pendingPayout,
+        completed: completedPayout,
+        total: profile.totalPayouts,
+      },
+    });
+  } catch (error) {
+    console.error('Ref jobs PUT error:', error);
+    return NextResponse.json({ error: 'Failed to load ref stats' }, { status: 500 });
   }
-  
-  const profile = refProfiles[refId];
-  if (!profile) {
-    return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
-  }
-  
-  // Get jobs claimed by this ref
-  const myJobs = jobs.filter(j => j.claimedBy === refId);
-  
-  // Calculate earnings
-  const pendingPayout = myJobs
-    .filter(j => j.status === 'CLAIMED')
-    .reduce((sum, j) => sum + j.pay, 0);
-  
-  const completedPayout = myJobs
-    .filter(j => j.status === 'COMPLETED')
-    .reduce((sum, j) => sum + j.pay, 0);
-  
-  return NextResponse.json({
-    profile,
-    myJobs,
-    earnings: {
-      pending: pendingPayout,
-      completed: completedPayout,
-      total: profile.totalPayouts,
-    },
-  });
 }
