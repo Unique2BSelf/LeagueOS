@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = {
+  payment: {
+    findUnique: vi.fn(),
+    update: vi.fn(),
+  },
   registration: {
     findUnique: vi.fn(),
     update: vi.fn(),
@@ -34,6 +38,15 @@ describe('finalizeStripeCheckoutSession', () => {
   });
 
   it('marks the registration paid and queues a receipt email', async () => {
+    prismaMock.payment.findUnique.mockResolvedValueOnce({
+      id: 'payment-1',
+      userId: 'user-1',
+      registrationId: 'reg-1',
+      ledgerEntryId: null,
+      amount: 150,
+      status: 'PENDING',
+    });
+    prismaMock.payment.update.mockResolvedValueOnce({});
     prismaMock.registration.findUnique.mockResolvedValueOnce({
       id: 'reg-1',
       userId: 'user-1',
@@ -55,14 +68,23 @@ describe('finalizeStripeCheckoutSession', () => {
     await finalizeStripeCheckoutSession({
       id: 'cs_test_123',
       payment_status: 'paid',
-      metadata: { registrationId: 'reg-1' },
+      payment_intent: 'pi_test_123',
+      metadata: { paymentId: 'payment-1', registrationId: 'reg-1' },
     } as any);
 
+    expect(prismaMock.payment.update).toHaveBeenCalledWith({
+      where: { id: 'payment-1' },
+      data: expect.objectContaining({
+        status: 'COMPLETED',
+        stripeSessionId: 'cs_test_123',
+        stripePaymentIntentId: 'pi_test_123',
+      }),
+    });
     expect(prismaMock.registration.update).toHaveBeenCalledWith({
       where: { id: 'reg-1' },
       data: {
         paid: true,
-        paymentId: 'cs_test_123',
+        paymentId: 'pi_test_123',
         status: 'APPROVED',
       },
     });

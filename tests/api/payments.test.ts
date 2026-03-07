@@ -5,11 +5,12 @@ const prismaMock = {
   registration: {
     findUnique: vi.fn(),
   },
+  payment: {
+    create: vi.fn(),
+    update: vi.fn(),
+  },
   user: {
     findUnique: vi.fn(),
-  },
-  ledger: {
-    create: vi.fn(),
   },
 };
 
@@ -44,6 +45,13 @@ describe('POST /api/payments', () => {
       season: { name: 'Spring 2026' },
       user: { fullName: 'Test Player', email: 'player@example.com' },
     });
+    prismaMock.payment.create.mockResolvedValueOnce({
+      id: 'payment-1',
+    });
+    prismaMock.payment.update.mockResolvedValueOnce({
+      id: 'payment-1',
+      stripeSessionId: 'cs_test_123',
+    });
     stripeSessionCreateMock.mockResolvedValueOnce({
       id: 'cs_test_123',
       url: 'https://checkout.stripe.test/session/123',
@@ -60,9 +68,11 @@ describe('POST /api/payments', () => {
     const payload = await response.json();
     expect(payload.checkoutUrl).toBe('https://checkout.stripe.test/session/123');
     expect(payload.stripeSessionId).toBe('cs_test_123');
+    expect(payload.paymentId).toBe('payment-1');
     expect(stripeSessionCreateMock).toHaveBeenCalledWith(expect.objectContaining({
       mode: 'payment',
       metadata: expect.objectContaining({
+        paymentId: 'payment-1',
         registrationId: 'registration-1',
         seasonId: 'season-1',
         userId: 'player-1',

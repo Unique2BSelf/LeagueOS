@@ -1,5 +1,15 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { PaymentMethod, PaymentStatus, TransactionType } from '@prisma/client';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { createPaymentRecord } from '@/lib/payments';
+
+function normalizeManualMethod(value: unknown): PaymentMethod {
+  const candidate = typeof value === 'string' ? value.toUpperCase() : 'CASH';
+  if (candidate in PaymentMethod) {
+    return PaymentMethod[candidate as keyof typeof PaymentMethod];
+  }
+  return PaymentMethod.OTHER;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,13 +41,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Registration already paid' }, { status: 400 });
     }
 
-    const paymentId = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    const normalizedMethod = normalizeManualMethod(paymentMethod);
+    const payment = await createPaymentRecord({
+      userId: registration.userId,
+      registrationId,
+      seasonId: registration.seasonId,
+      amount: Number(amount),
+      method: normalizedMethod,
+      status: PaymentStatus.COMPLETED,
+      transactionType: TransactionType.REGISTRATION,
+      providerReference: `manual:${normalizedMethod}`,
+      venmoHandle: venmoHandle || null,
+      notes: notes || null,
+      processedAt: new Date(),
+    });
 
     await prisma.registration.update({
       where: { id: registrationId },
       data: {
         paid: true,
-        paymentId,
+        paymentId: payment.id,
         status: 'APPROVED',
       },
     });
@@ -49,22 +72,22 @@ export async function POST(request: NextRequest) {
         type: 'REGISTRATION',
         status: 'COMPLETED',
         year: new Date().getFullYear(),
-        description: `Manual ${paymentMethod} payment for ${registration.season.name}${notes ? ` - ${notes}` : ''}${venmoHandle ? ` (${venmoHandle})` : ''}`,
+        description: `Manual ${normalizedMethod} payment for ${registration.season.name}${notes ? ` - ${notes}` : ''}${venmoHandle ? ` (${venmoHandle})` : ''}`,
       },
     });
 
     return NextResponse.json({
       success: true,
       payment: {
-        id: paymentId,
+        id: payment.id,
         registrationId,
         amount: Number(amount),
-        method: paymentMethod,
+        method: normalizedMethod,
         notes,
         venmoHandle,
         status: 'COMPLETED',
       },
-      message: `Manual ${paymentMethod} payment recorded`,
+      message: `Manual ${normalizedMethod} payment recorded`,
     });
   } catch (error) {
     console.error('Error recording manual payment:', error);

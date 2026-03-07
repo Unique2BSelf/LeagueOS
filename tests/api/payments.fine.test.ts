@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = {
+  payment: {
+    findUnique: vi.fn(),
+    update: vi.fn(),
+  },
   ledger: {
     findUnique: vi.fn(),
     update: vi.fn(),
@@ -25,6 +29,15 @@ describe('finalizeStripeCheckoutSession fine payments', () => {
   });
 
   it('marks a fine ledger paid and syncs disciplinary release state', async () => {
+    prismaMock.payment.findUnique.mockResolvedValueOnce({
+      id: 'payment-1',
+      userId: 'player-1',
+      registrationId: null,
+      ledgerEntryId: 'ledger-1',
+      amount: 50,
+      status: 'PENDING',
+    });
+    prismaMock.payment.update.mockResolvedValueOnce({});
     prismaMock.ledger.findUnique.mockResolvedValueOnce({
       id: 'ledger-1',
       amount: 50,
@@ -41,10 +54,19 @@ describe('finalizeStripeCheckoutSession fine payments', () => {
     const finalized = await finalizeStripeCheckoutSession({
       id: 'cs_fine_123',
       payment_status: 'paid',
-      metadata: { ledgerEntryId: 'ledger-1' },
+      payment_intent: 'pi_fine_123',
+      metadata: { paymentId: 'payment-1', ledgerEntryId: 'ledger-1' },
     } as any);
 
     expect(finalized.id).toBe('ledger-1');
+    expect(prismaMock.payment.update).toHaveBeenCalledWith({
+      where: { id: 'payment-1' },
+      data: expect.objectContaining({
+        status: 'COMPLETED',
+        stripeSessionId: 'cs_fine_123',
+        stripePaymentIntentId: 'pi_fine_123',
+      }),
+    });
     expect(prismaMock.ledger.update).toHaveBeenCalledWith({
       where: { id: 'ledger-1' },
       data: { status: 'PAID' },

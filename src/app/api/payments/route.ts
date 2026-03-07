@@ -1,43 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { PaymentMethod, PaymentStatus, TransactionType } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { createPaymentRecord, refundStoredPayment } from '@/lib/payments';
 import { getRequestOrigin, getStripeClient } from '@/lib/stripe';
 
 export const runtime = 'nodejs';
 
-export interface PaymentRecord {
-  id: string;
-  registrationId: string;
-  userId: string;
-  seasonId: string;
-  amount: number;
-  method: 'CARD' | 'CASH' | 'VENMO' | 'APPLE_PAY';
-  status: 'PENDING' | 'COMPLETED' | 'FAILED' | 'REFUNDED';
-  stripePaymentId?: string;
-  venmoHandle?: string;
-  notes?: string;
-  createdAt: Date;
-  updatedAt: Date;
-  processedAt?: Date;
-  refundedAt?: Date;
-}
-
-const paymentsDb: Map<string, PaymentRecord> = new Map();
-
 async function getActor(userId: string) {
   return prisma.user.findUnique({ where: { id: userId } });
-}
-
-async function recordRegistrationLedger(userId: string, amount: number, description: string) {
-  await prisma.ledger.create({
-    data: {
-      userId,
-      amount,
-      type: 'REGISTRATION',
-      status: 'COMPLETED',
-      year: new Date().getFullYear(),
-      description,
-    },
-  });
 }
 
 async function findRegistrationWithSeason(registrationId: string) {
@@ -59,6 +29,46 @@ async function findFineLedger(ledgerEntryId: string) {
       },
     },
   });
+}
+
+function normalizeMethod(value: unknown): PaymentMethod {
+  const candidate = typeof value === 'string' ? value.toUpperCase() : 'CARD';
+  if (candidate in PaymentMethod) {
+    return PaymentMethod[candidate as keyof typeof PaymentMethod];
+  }
+  return PaymentMethod.CARD;
+}
+
+function serializePayment(payment: any) {
+  return {
+    id: payment.id,
+    registrationId: payment.registrationId,
+    ledgerEntryId: payment.ledgerEntryId,
+    userId: payment.userId,
+    seasonId: payment.seasonId,
+    amount: payment.amount,
+    method: payment.method,
+    status: payment.status,
+    notes: payment.notes,
+    venmoHandle: payment.venmoHandle,
+    stripeSessionId: payment.stripeSessionId,
+    stripePaymentIntentId: payment.stripePaymentIntentId,
+    processedAt: payment.processedAt,
+    refundedAt: payment.refundedAt,
+    createdAt: payment.createdAt,
+    updatedAt: payment.updatedAt,
+    registration: payment.registration ? {
+      id: payment.registration.id,
+      seasonName: payment.registration.season?.name,
+      userName: payment.registration.user?.fullName,
+      userEmail: payment.registration.user?.email,
+    } : undefined,
+    ledgerEntry: payment.ledgerEntry ? {
+      id: payment.ledgerEntry.id,
+      description: payment.ledgerEntry.description,
+      status: payment.ledgerEntry.status,
+    } : undefined,
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -87,34 +97,35 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const existingPending = Array.from(paymentsDb.values()).find((payment) => payment.registrationId === (registrationId || ledgerEntryId) && payment.status === 'PENDING');
-    if (existingPending) {
-      return NextResponse.json({
-        paymentId: existingPending.id,
-        amount: existingPending.amount,
-        checkoutUrl: undefined,
-        method: existingPending.method,
-        message: 'Existing payment intent reused',
-      });
-    }
+    const normalizedMethod = normalizeMethod(method);
+    const amount = registration ? registration.amount : Number(fineLedger!.amount);
+    const targetTransactionType = registration ? TransactionType.REGISTRATION : TransactionType.FINE;
 
-    const paymentId = `pay_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-    const normalizedMethod = method as PaymentRecord['method'];
-
-    if (normalizedMethod === 'CARD' || normalizedMethod === 'APPLE_PAY') {
+    if (normalizedMethod === PaymentMethod.CARD || normalizedMethod === PaymentMethod.APPLE_PAY) {
       const stripe = getStripeClient();
       const origin = getRequestOrigin(request);
-      const amount = registration ? registration.amount : Number(fineLedger!.amount);
       const description = registration
         ? `${registration.season.name} Registration`
         : 'League disciplinary fine';
       const customerEmail = registration ? registration.user.email : fineLedger!.user.email;
+
+      const pendingPayment = await createPaymentRecord({
+        userId,
+        registrationId: registration?.id,
+        ledgerEntryId: fineLedger?.id,
+        seasonId: registration?.seasonId || null,
+        amount,
+        method: normalizedMethod,
+        transactionType: targetTransactionType,
+      });
+
       const checkoutSession = await stripe.checkout.sessions.create({
         mode: 'payment',
         success_url: `${origin}/dashboard/payments?payment=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/dashboard/payments?payment=cancelled`,
         customer_email: customerEmail,
         metadata: {
+          paymentId: pendingPayment.id,
           ...(registration ? {
             registrationId: registration.id,
             seasonId: registration.seasonId,
@@ -141,24 +152,17 @@ export async function POST(request: NextRequest) {
         ],
       });
 
-      const payment: PaymentRecord = {
-        id: paymentId,
-        registrationId: registrationId || ledgerEntryId,
-        userId,
-        seasonId: registration?.seasonId || 'disciplinary',
-        amount: registration ? registration.amount : Number(fineLedger!.amount),
-        method: normalizedMethod,
-        status: 'PENDING',
-        stripePaymentId: checkoutSession.id,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      paymentsDb.set(paymentId, payment);
+      const updated = await prisma.payment.update({
+        where: { id: pendingPayment.id },
+        data: {
+          stripeSessionId: checkoutSession.id,
+          providerReference: checkoutSession.id,
+        },
+      });
 
       return NextResponse.json({
-        paymentId,
-        amount: registration ? registration.amount : Number(fineLedger!.amount),
+        paymentId: updated.id,
+        amount,
         checkoutUrl: checkoutSession.url,
         stripeSessionId: checkoutSession.id,
         method: normalizedMethod,
@@ -166,23 +170,20 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const payment: PaymentRecord = {
-      id: paymentId,
-      registrationId: registrationId || ledgerEntryId,
+    const payment = await createPaymentRecord({
       userId,
-      seasonId: registration?.seasonId || 'disciplinary',
-      amount: registration ? registration.amount : Number(fineLedger!.amount),
+      registrationId: registration?.id,
+      ledgerEntryId: fineLedger?.id,
+      seasonId: registration?.seasonId || null,
+      amount,
       method: normalizedMethod,
-      status: 'PENDING',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    paymentsDb.set(paymentId, payment);
+      transactionType: targetTransactionType,
+      status: PaymentStatus.PENDING,
+    });
 
     return NextResponse.json({
-      paymentId,
-      amount: registration ? registration.amount : Number(fineLedger!.amount),
+      paymentId: payment.id,
+      amount,
       method: normalizedMethod,
       message: `Payment method ${normalizedMethod} awaiting admin confirmation.`,
     });
@@ -204,42 +205,26 @@ export async function GET(request: NextRequest) {
     const seasonId = searchParams.get('seasonId');
     const status = searchParams.get('status');
 
-    let payments: any[] = Array.from(paymentsDb.values());
-    if (!isAdmin) payments = payments.filter((payment) => payment.userId === userId);
-    if (registrationId) payments = payments.filter((payment) => payment.registrationId === registrationId);
-    if (seasonId) payments = payments.filter((payment) => payment.seasonId === seasonId);
-    if (status) payments = payments.filter((payment) => payment.status === status);
-
-    const completedRegistrations = await prisma.registration.findMany({
-      where: isAdmin
-        ? { ...(registrationId ? { id: registrationId } : {}), ...(seasonId ? { seasonId } : {}), paid: true }
-        : { userId, ...(registrationId ? { id: registrationId } : {}), ...(seasonId ? { seasonId } : {}), paid: true },
-      include: { season: true, user: { select: { fullName: true, email: true } } },
+    const payments = await prisma.payment.findMany({
+      where: {
+        ...(isAdmin ? {} : { userId }),
+        ...(registrationId ? { registrationId } : {}),
+        ...(seasonId ? { seasonId } : {}),
+        ...(status && status in PaymentStatus ? { status: PaymentStatus[status as keyof typeof PaymentStatus] } : {}),
+      },
+      include: {
+        registration: {
+          include: {
+            season: true,
+            user: { select: { fullName: true, email: true } },
+          },
+        },
+        ledgerEntry: true,
+      },
       orderBy: { updatedAt: 'desc' },
     });
 
-    const persisted = completedRegistrations.map((registration) => ({
-      id: registration.paymentId || `registration_${registration.id}`,
-      registrationId: registration.id,
-      userId: registration.userId,
-      seasonId: registration.seasonId,
-      amount: registration.amount,
-      method: 'CARD',
-      status: 'COMPLETED',
-      createdAt: registration.createdAt,
-      updatedAt: registration.updatedAt,
-      processedAt: registration.updatedAt,
-      registration: {
-        userName: registration.user.fullName,
-        userEmail: registration.user.email,
-        seasonName: registration.season.name,
-      },
-    }));
-
-    const merged = [...payments, ...persisted.filter((item) => !payments.some((payment) => payment.registrationId === item.registrationId && payment.status === item.status))]
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-
-    return NextResponse.json(merged);
+    return NextResponse.json(payments.map(serializePayment));
   } catch (error) {
     console.error('Error fetching payments:', error);
     return NextResponse.json({ error: 'Failed to fetch payments' }, { status: 500 });
@@ -258,38 +243,67 @@ export async function PUT(request: NextRequest) {
     }
 
     const { paymentId, action, notes } = await request.json();
-    const payment = paymentsDb.get(paymentId);
+    const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
     if (!payment) return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
 
     if (action === 'confirm') {
-      payment.status = 'COMPLETED';
-      payment.processedAt = new Date();
-      payment.updatedAt = new Date();
-      paymentsDb.set(paymentId, payment);
-
-      const registration = await findRegistrationWithSeason(payment.registrationId);
-      if (!registration) return NextResponse.json({ error: 'Registration not found' }, { status: 404 });
-
-      await prisma.registration.update({
-        where: { id: payment.registrationId },
+      const updated = await prisma.payment.update({
+        where: { id: paymentId },
         data: {
-          paid: true,
-          paymentId: payment.stripePaymentId || paymentId,
-          status: 'APPROVED',
+          status: PaymentStatus.COMPLETED,
+          processedAt: new Date(),
+          notes: notes || payment.notes,
+        },
+        include: {
+          registration: { include: { season: true, user: { select: { fullName: true, email: true } } } },
+          ledgerEntry: true,
         },
       });
 
-      await recordRegistrationLedger(payment.userId, payment.amount, `Registration payment for ${registration.season.name} via ${payment.method}`);
-    } else if (action === 'fail') {
-      payment.status = 'FAILED';
-      payment.notes = notes;
-      payment.updatedAt = new Date();
-      paymentsDb.set(paymentId, payment);
-    } else {
-      return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+      if (updated.registrationId && updated.registration && !updated.registration.paid) {
+        await prisma.registration.update({
+          where: { id: updated.registrationId },
+          data: {
+            paid: true,
+            paymentId: updated.id,
+            status: 'APPROVED',
+          },
+        });
+
+        await prisma.ledger.create({
+          data: {
+            userId: updated.userId,
+            amount: updated.amount,
+            type: 'REGISTRATION',
+            status: 'COMPLETED',
+            year: new Date().getFullYear(),
+            description: `Registration payment for ${updated.registration.season.name} via ${updated.method}`,
+          },
+        });
+      }
+
+      if (updated.ledgerEntryId) {
+        await prisma.ledger.update({
+          where: { id: updated.ledgerEntryId },
+          data: { status: 'PAID' },
+        });
+      }
+
+      return NextResponse.json(serializePayment(updated));
     }
 
-    return NextResponse.json(payment);
+    if (action === 'fail') {
+      const updated = await prisma.payment.update({
+        where: { id: paymentId },
+        data: {
+          status: PaymentStatus.FAILED,
+          notes: notes || payment.notes,
+        },
+      });
+      return NextResponse.json(serializePayment(updated));
+    }
+
+    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   } catch (error) {
     console.error('Error confirming payment:', error);
     return NextResponse.json({ error: 'Failed to confirm payment' }, { status: 500 });
@@ -305,36 +319,10 @@ export async function PATCH(request: NextRequest) {
     if (!user || user.role !== 'ADMIN') return NextResponse.json({ error: 'Admin only' }, { status: 403 });
 
     const { paymentId, reason } = await request.json();
-    const payment = paymentsDb.get(paymentId);
-    if (!payment) return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
-    if (payment.status !== 'COMPLETED') return NextResponse.json({ error: 'Can only refund completed payments' }, { status: 400 });
-
-    payment.status = 'REFUNDED';
-    payment.refundedAt = new Date();
-    payment.notes = reason;
-    payment.updatedAt = new Date();
-    paymentsDb.set(paymentId, payment);
-
-    await prisma.registration.update({
-      where: { id: payment.registrationId },
-      data: { paid: false, paymentId: null, status: 'PENDING' },
-    });
-
-    await prisma.ledger.create({
-      data: {
-        userId: payment.userId,
-        amount: -Math.abs(payment.amount),
-        type: 'REFUND',
-        status: 'COMPLETED',
-        year: new Date().getFullYear(),
-        description: reason || 'Registration refund',
-      },
-    });
-
-    return NextResponse.json({ success: true, payment });
+    const payment = await refundStoredPayment(paymentId, reason);
+    return NextResponse.json({ success: true, payment: serializePayment(payment) });
   } catch (error) {
     console.error('Error processing refund:', error);
-    return NextResponse.json({ error: 'Failed to process refund' }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to process refund' }, { status: 500 });
   }
 }
-

@@ -95,6 +95,22 @@ enum EmailDeliveryStatus {
   SKIPPED
 }
 
+enum PaymentMethod {
+  CARD
+  CASH
+  VENMO
+  APPLE_PAY
+  CHECK
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
 enum AvailabilityStatus {
   YES
   NO
@@ -164,6 +180,7 @@ model User {
   orders            Order[]
   registrations     Registration[]
   insurancePolicies InsurancePolicy[]
+  payments          Payment[]
   messages          Message[]
   uploadedFiles     StoredFile[]
   certifications    OfficialCertification[]
@@ -251,6 +268,7 @@ model Ledger {
   createdAt     DateTime            @default(now())
 
   user          User                @relation(fields: [userId], references: [id])
+  payment       Payment?
 }
 
 model Sub {
@@ -561,8 +579,39 @@ model Registration {
 
   user            User                @relation(fields: [userId], references: [id])
   season          Season              @relation(fields: [seasonId], references: [id])
+  payments        Payment[]
 
   @@unique([userId, seasonId]) // One registration per user per season
+}
+
+model Payment {
+  id                 String           @id @default(uuid())
+  userId             String
+  registrationId     String?
+  ledgerEntryId      String?          @unique
+  seasonId           String?
+  amount             Float
+  method             PaymentMethod
+  status             PaymentStatus    @default(PENDING)
+  transactionType    TransactionType
+  stripeSessionId    String?          @unique
+  stripePaymentIntentId String?
+  providerReference  String?
+  venmoHandle        String?
+  notes              String?
+  processedAt        DateTime?
+  refundedAt         DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  user               User             @relation(fields: [userId], references: [id])
+  registration       Registration?    @relation(fields: [registrationId], references: [id])
+  ledgerEntry        Ledger?          @relation(fields: [ledgerEntryId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([registrationId, status])
+  @@index([seasonId, createdAt])
+  @@index([transactionType, status])
 }
 
 // Insurance Policy - 365-day annual tracking per PRD
