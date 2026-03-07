@@ -1,93 +1,311 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { checkSubEligibility, calculateDivisionAverageElo } from '@/lib/subEligibility';
+import { prisma } from '@/lib/prisma';
+import { getSessionFromRequest } from '@/lib/auth';
+import { calculateDivisionAverageElo, checkSubEligibility } from '@/lib/subEligibility';
 
-// Mock data - in production, fetch from Prisma
-const mockPlayers: Record<string, any> = {
-  'player-1': { id: 'player-1', eloRating: 1450, isGoalie: false, isInsured: true, homeDivision: 2 },
-  'player-2': { id: 'player-2', eloRating: 1600, isGoalie: false, isInsured: true, homeDivision: 2 },
-  'player-goalie': { id: 'player-goalie', eloRating: 1100, isGoalie: true, isInsured: true, homeDivision: 1 },
-  'player-uninsured': { id: 'player-uninsured', eloRating: 1300, isGoalie: false, isInsured: false, homeDivision: 2 },
-};
-
-const mockMatches: Record<string, any> = {
-  'match-1': { id: 'match-1', division: 2 },
-  'match-2': { id: 'match-2', division: 3 },
-};
-
-const mockTeams: Record<string, any> = {
-  'team-1': { id: 'team-1', subQuotaRemaining: 5 },
-  'team-2': { id: 'team-2', subQuotaRemaining: 0 },
-};
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { playerId, matchId, teamId } = body;
-    
-    if (!playerId || !matchId || !teamId) {
-      return NextResponse.json(
-        { error: 'playerId, matchId, and teamId are required' },
-        { status: 400 }
-      );
-    }
-    
-    const player = mockPlayers[playerId];
-    const match = mockMatches[matchId];
-    const team = mockTeams[teamId];
-    
-    if (!player) {
-      return NextResponse.json({ error: 'Player not found' }, { status: 404 });
-    }
-    if (!match) {
-      return NextResponse.json({ error: 'Match not found' }, { status: 404 });
-    }
-    if (!team) {
-      return NextResponse.json({ error: 'Team not found' }, { status: 404 });
-    }
-    
-    // Calculate division average ELO (mock - in production query team players)
-    const divisionAverageElo = calculateDivisionAverageElo([
-      { eloRating: 1300 },
-      { eloRating: 1400 },
-      { eloRating: 1500 },
-      { eloRating: 1450 },
-    ]);
-    
-    const result = checkSubEligibility(player, match, team, divisionAverageElo);
-    
-    return NextResponse.json({
-      player,
-      match,
-      team,
-      divisionAverageElo,
-      ...result,
-    });
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+async function getActor(request: NextRequest) {
+  const session = await getSessionFromRequest(request);
+  if (!session) {
+    return null;
   }
+
+  return prisma.user.findUnique({
+    where: { id: session.userId },
+    select: {
+      id: true,
+      role: true,
+      isActive: true,
+      isInsured: true,
+      isGoalie: true,
+      eloRating: true,
+    },
+  });
+}
+
+async function getApprovedMemberships(userId: string) {
+  return prisma.teamPlayer.findMany({
+    where: { userId, status: 'APPROVED' },
+    include: {
+      team: {
+        include: {
+          division: true,
+        },
+      },
+    },
+  });
+}
+
+function getHomeDivisionLevel(memberships: Awaited<ReturnType<typeof getApprovedMemberships>>) {
+  if (memberships.length === 0) {
+    return null;
+  }
+
+  return memberships.reduce((lowest, membership) => {
+    if (lowest === null) {
+      return membership.team.division.level;
+    }
+
+    return Math.min(lowest, membership.team.division.level);
+  }, null as number | null);
+}
+
+async function getDivisionAverageElo(divisionId: string) {
+  const players = await prisma.teamPlayer.findMany({
+    where: {
+      status: 'APPROVED',
+      team: { divisionId },
+      user: { isActive: true },
+    },
+    select: {
+      user: {
+        select: {
+          eloRating: true,
+        },
+      },
+    },
+  });
+
+  return calculateDivisionAverageElo(players.map((entry) => ({ eloRating: entry.user.eloRating })));
+}
+
+async function resolveEligibilityForActor(input: {
+  actorId: string;
+  matchId: string;
+  teamId: string;
+  overrideUserId?: string | null;
+}) {
+  const memberships = await getApprovedMemberships(input.overrideUserId || input.actorId);
+  const homeDivisionLevel = getHomeDivisionLevel(memberships);
+
+  if (homeDivisionLevel === null) {
+    return {
+      eligible: false,
+      reason: 'Player must be on an approved roster to claim this sub request',
+    };
+  }
+
+  const [actor, team, match] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: input.overrideUserId || input.actorId },
+      select: {
+        id: true,
+        fullName: true,
+        isActive: true,
+        isInsured: true,
+        isGoalie: true,
+        eloRating: true,
+      },
+    }),
+    prisma.team.findUnique({
+      where: { id: input.teamId },
+      include: { division: true },
+    }),
+    prisma.match.findUnique({
+      where: { id: input.matchId },
+      include: {
+        homeTeam: true,
+        awayTeam: true,
+      },
+    }),
+  ]);
+
+  if (!actor || !actor.isActive) {
+    return { eligible: false, reason: 'Player not found or inactive' };
+  }
+
+  if (!team) {
+    return { eligible: false, reason: 'Team not found' };
+  }
+
+  if (!match) {
+    return { eligible: false, reason: 'Match not found' };
+  }
+
+  const divisionAverageElo = await getDivisionAverageElo(team.divisionId);
+  const eligibility = checkSubEligibility(
+    {
+      id: actor.id,
+      eloRating: actor.eloRating,
+      isGoalie: actor.isGoalie,
+      isInsured: actor.isInsured,
+      homeDivision: homeDivisionLevel,
+    },
+    {
+      id: match.id,
+      division: team.division.level,
+    },
+    {
+      id: team.id,
+      subQuotaRemaining: team.subQuotaRemaining,
+    },
+    divisionAverageElo
+  );
+
+  return {
+    ...eligibility,
+    player: {
+      id: actor.id,
+      fullName: actor.fullName,
+      isInsured: actor.isInsured,
+      isGoalie: actor.isGoalie,
+      eloRating: actor.eloRating,
+      homeDivision: homeDivisionLevel,
+    },
+    team: {
+      id: team.id,
+      name: team.name,
+      divisionId: team.divisionId,
+      divisionLevel: team.division.level,
+      subQuotaRemaining: team.subQuotaRemaining,
+    },
+    match: {
+      id: match.id,
+      scheduledAt: match.scheduledAt.toISOString(),
+      homeTeam: match.homeTeam.name,
+      awayTeam: match.awayTeam.name,
+    },
+    divisionAverageElo,
+  };
 }
 
 export async function GET(request: NextRequest) {
+  const actor = await getActor(request);
+  if (!actor || !actor.isActive) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
-  const playerId = searchParams.get('playerId');
+  const subId = searchParams.get('subId');
   const matchId = searchParams.get('matchId');
-  
-  // Return eligibility rules info
+  const teamId = searchParams.get('teamId');
+  const playerId = searchParams.get('playerId');
+
+  const overrideUserId = playerId && ['ADMIN', 'MODERATOR', 'REF'].includes(actor.role) ? playerId : null;
+
+  if (subId) {
+    const sub = await prisma.sub.findUnique({
+      where: { id: subId },
+      select: {
+        id: true,
+        matchId: true,
+        teamId: true,
+        status: true,
+      },
+    });
+
+    if (!sub) {
+      return NextResponse.json({ error: 'Sub request not found' }, { status: 404 });
+    }
+
+    const eligibility = await resolveEligibilityForActor({
+      actorId: actor.id,
+      matchId: sub.matchId,
+      teamId: sub.teamId,
+      overrideUserId,
+    });
+
+    return NextResponse.json({
+      rules: {
+        standard: '1-Down / Any-Up',
+        goalieException: true,
+        ringerFlagThresholdMultiplier: 1.5,
+        insuranceRequired: true,
+        seasonalQuotaRequired: true,
+      },
+      subRequest: {
+        id: sub.id,
+        status: sub.status,
+      },
+      eligibility,
+    });
+  }
+
+  if (!matchId || !teamId) {
+    return NextResponse.json({
+      rules: {
+        standard: '1-Down / Any-Up',
+        goalieException: true,
+        ringerFlagThresholdMultiplier: 1.5,
+        insuranceRequired: true,
+        seasonalQuotaRequired: true,
+      },
+    });
+  }
+
+  const eligibility = await resolveEligibilityForActor({
+    actorId: actor.id,
+    matchId,
+    teamId,
+    overrideUserId,
+  });
+
   return NextResponse.json({
     rules: {
-      standard: 'player.homeDivision >= match.division - 1 && <= match.division + any higher',
-      goalieException: 'if player.isGoalie === true → ignore division restriction',
-      ringerFlag: 'if player.eloRating > (divisionAverage * 1.5) → notify admin/ref',
-      insurance: 'Free for insured players only',
-      quota: 'Seasonal quota per team; injury subs exempt from quota (admin approval)',
+      standard: '1-Down / Any-Up',
+      goalieException: true,
+      ringerFlagThresholdMultiplier: 1.5,
+      insuranceRequired: true,
+      seasonalQuotaRequired: true,
     },
-    mockData: {
-      players: Object.keys(mockPlayers),
-      matches: Object.keys(mockMatches),
-      teams: Object.keys(mockTeams),
-    }
+    eligibility,
   });
+}
+
+export async function POST(request: NextRequest) {
+  const actor = await getActor(request);
+  if (!actor || !actor.isActive) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const subId = typeof body.subId === 'string' ? body.subId : '';
+  const matchId = typeof body.matchId === 'string' ? body.matchId : '';
+  const teamId = typeof body.teamId === 'string' ? body.teamId : '';
+  const playerId = typeof body.playerId === 'string' ? body.playerId : '';
+
+  const overrideUserId = playerId && ['ADMIN', 'MODERATOR', 'REF'].includes(actor.role) ? playerId : null;
+
+  if (subId) {
+    const sub = await prisma.sub.findUnique({
+      where: { id: subId },
+      select: {
+        id: true,
+        matchId: true,
+        teamId: true,
+        status: true,
+      },
+    });
+
+    if (!sub) {
+      return NextResponse.json({ error: 'Sub request not found' }, { status: 404 });
+    }
+
+    const eligibility = await resolveEligibilityForActor({
+      actorId: actor.id,
+      matchId: sub.matchId,
+      teamId: sub.teamId,
+      overrideUserId,
+    });
+
+    return NextResponse.json({
+      subRequest: {
+        id: sub.id,
+        status: sub.status,
+      },
+      eligibility,
+    });
+  }
+
+  if (!matchId || !teamId) {
+    return NextResponse.json({ error: 'matchId and teamId are required' }, { status: 400 });
+  }
+
+  const eligibility = await resolveEligibilityForActor({
+    actorId: actor.id,
+    matchId,
+    teamId,
+    overrideUserId,
+  });
+
+  return NextResponse.json({ eligibility });
 }
