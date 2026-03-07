@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSessionFromRequest } from '@/lib/auth';
+import { createAuditLog } from '@/lib/audit';
 
 async function getActor(request: NextRequest) {
   const session = await getSessionFromRequest(request);
@@ -12,6 +13,7 @@ async function getActor(request: NextRequest) {
     where: { id: session.userId },
     select: {
       id: true,
+      email: true,
       role: true,
       fullName: true,
       isActive: true,
@@ -102,14 +104,37 @@ export async function PATCH(
 
     const team = await prisma.team.findUnique({
       where: { id: teamId },
-      select: { captainId: true },
+      include: {
+        season: {
+          select: {
+            id: true,
+            name: true,
+            maxRosterSize: true,
+          },
+        },
+      },
     });
 
-    if (team?.captainId === userId && action !== 'APPROVE') {
+    if (!team) {
+      return NextResponse.json({ error: 'Team not found' }, { status: 404 });
+    }
+
+    if (team.captainId === userId && action !== 'APPROVE') {
       return NextResponse.json({ error: 'The team captain cannot be removed from the roster here' }, { status: 400 });
     }
 
     if (action === 'APPROVE') {
+      const approvedCount = await prisma.teamPlayer.count({
+        where: {
+          teamId,
+          status: 'APPROVED',
+        },
+      });
+
+      if (approvedCount >= team.season.maxRosterSize) {
+        return NextResponse.json({ error: 'Roster is already full for this season' }, { status: 409 });
+      }
+
       const updated = await prisma.teamPlayer.update({
         where: {
           userId_teamId: {
@@ -131,6 +156,20 @@ export async function PATCH(
         },
       });
 
+      await createAuditLog({
+        actor,
+        actionType: 'APPROVE',
+        entityType: 'TEAM',
+        entityId: teamId,
+        after: {
+          userId,
+          status: 'APPROVED',
+          teamId,
+          seasonId: team.season.id,
+          seasonName: team.season.name,
+        },
+      });
+
       return NextResponse.json(updated);
     }
 
@@ -142,6 +181,21 @@ export async function PATCH(
             teamId,
           },
         },
+      });
+
+      await createAuditLog({
+        actor,
+        actionType: action === 'REJECT' ? 'REJECT' : 'DELETE',
+        entityType: 'TEAM',
+        entityId: teamId,
+        before: {
+          userId,
+          status: membership.status,
+          teamId,
+          seasonId: team.season.id,
+          seasonName: team.season.name,
+        },
+        notes: action === 'REJECT' ? 'Captain/admin rejected join request' : 'Captain/admin removed rostered player',
       });
 
       return NextResponse.json({ success: true, removedUserId: userId, action });

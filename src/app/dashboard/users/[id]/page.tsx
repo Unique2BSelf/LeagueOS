@@ -12,6 +12,8 @@ import {
 interface Team {
   id: string;
   name: string;
+  seasonName?: string;
+  division?: string;
 }
 
 interface UserData {
@@ -122,13 +124,15 @@ export default function UserDetailPage() {
   const [activeTab, setActiveTab] = useState('details');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteMode, setDeleteMode] = useState<'soft' | 'hard'>('soft');
+  const [rosterLoading, setRosterLoading] = useState(false);
+  const [rosterError, setRosterError] = useState('');
+  const [selectedRosterTeamId, setSelectedRosterTeamId] = useState('');
   
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
     phone: '',
     role: '',
-    teamId: '',
     isInsured: false,
     isActive: true,
     hideFromDirectory: false,
@@ -150,7 +154,6 @@ export default function UserDetailPage() {
           email: data.email,
           phone: data.phone || '',
           role: data.role,
-          teamId: data.teams[0]?.teamId || '',
           isInsured: data.isInsured,
           isActive: data.isActive,
           hideFromDirectory: data.hideFromDirectory,
@@ -186,7 +189,6 @@ export default function UserDetailPage() {
           email: formData.email,
           phone: formData.phone,
           role: formData.role,
-          teamId: formData.teamId || null,
           isInsured: formData.isInsured,
           isActive: formData.isActive,
           hideFromDirectory: formData.hideFromDirectory,
@@ -201,6 +203,34 @@ export default function UserDetailPage() {
       console.error('Failed to update user:', error);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRosterAssignment = async (action: 'ASSIGN' | 'MOVE' | 'REMOVE', teamId?: string) => {
+    setRosterLoading(true);
+    setRosterError('');
+    try {
+      const res = await fetch('/api/admin/rosters', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          teamId: teamId || selectedRosterTeamId,
+          action,
+        }),
+      });
+
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.error || 'Failed to update roster');
+      }
+
+      setSelectedRosterTeamId('');
+      await fetchUser();
+    } catch (error: any) {
+      setRosterError(error.message || 'Failed to update roster');
+    } finally {
+      setRosterLoading(false);
     }
   };
 
@@ -401,20 +431,6 @@ export default function UserDetailPage() {
               <div className="space-y-4">
                 <h3 className="text-lg font-bold text-white mb-4">Status & Settings</h3>
                 
-                <div>
-                  <label className="block text-white/70 text-sm mb-2">Team Assignment</label>
-                  <select
-                    value={formData.teamId}
-                    onChange={(e) => setFormData(f => ({ ...f, teamId: e.target.value }))}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500"
-                  >
-                    <option value="">No Team</option>
-                    {teams.map((team) => (
-                      <option key={team.id} value={team.id}>{team.name}</option>
-                    ))}
-                  </select>
-                </div>
-
                 <div className="flex items-center justify-between p-4 bg-white/5 rounded-lg">
                   <div>
                     <div className="text-white font-medium">Insurance Status</div>
@@ -491,6 +507,40 @@ export default function UserDetailPage() {
           {activeTab === 'teams' && (
             <div>
               <h3 className="text-lg font-bold text-white mb-4">Team Memberships</h3>
+              <div className="mb-6 rounded-lg border border-cyan-500/20 bg-cyan-500/10 p-4">
+                <h4 className="text-white font-medium mb-3">Admin Roster Assignment</h4>
+                <p className="text-white/60 text-sm mb-4">
+                  Assign or move this player onto a team directly without using an invite code. The assignment is audited.
+                </p>
+                {rosterError && (
+                  <div className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                    {rosterError}
+                  </div>
+                )}
+                <div className="flex flex-col gap-3 md:flex-row">
+                  <select
+                    value={selectedRosterTeamId}
+                    onChange={(e) => setSelectedRosterTeamId(e.target.value)}
+                    className="flex-1 bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500"
+                    data-testid="admin-roster-team-select"
+                  >
+                    <option value="">Select team...</option>
+                    {teams.map((team) => (
+                      <option key={team.id} value={team.id}>
+                        {team.name}{team.seasonName ? ` | ${team.seasonName}` : ''}{team.division ? ` | ${team.division}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => handleRosterAssignment(user.teams.length > 0 ? 'MOVE' : 'ASSIGN')}
+                    disabled={!selectedRosterTeamId || rosterLoading}
+                    className="rounded-lg bg-cyan-600 px-4 py-3 text-white disabled:opacity-50"
+                    data-testid="admin-roster-assign-button"
+                  >
+                    {rosterLoading ? 'Saving...' : user.teams.length > 0 ? 'Move to Team' : 'Assign to Team'}
+                  </button>
+                </div>
+              </div>
               {user.teams.length === 0 ? (
                 <p className="text-white/50 text-center py-8">No team memberships</p>
               ) : (
@@ -512,6 +562,14 @@ export default function UserDetailPage() {
                         <span className="text-white/50 text-xs">
                           Joined {new Date(team.joinedAt).toLocaleDateString()}
                         </span>
+                        <button
+                          onClick={() => handleRosterAssignment('REMOVE', team.teamId)}
+                          disabled={rosterLoading}
+                          className="rounded-md bg-red-500/20 px-3 py-2 text-xs text-red-300 hover:bg-red-500/30 disabled:opacity-50"
+                          data-testid={`admin-roster-remove-${team.teamId}`}
+                        >
+                          Remove
+                        </button>
                       </div>
                     </div>
                   ))}

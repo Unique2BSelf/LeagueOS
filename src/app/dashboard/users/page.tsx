@@ -358,6 +358,7 @@ export default function UsersPage() {
                       key={user.id} 
                       className="hover:bg-white/5 cursor-pointer transition-colors"
                       onClick={() => router.push(`/dashboard/users/${user.id}`)}
+                      data-testid={`user-row-${user.id}`}
                     >
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <input

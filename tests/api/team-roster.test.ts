@@ -12,13 +12,16 @@ const prismaMock = {
     findUnique: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
+    count: vi.fn(),
   },
 };
 
 const getSessionFromRequestMock = vi.fn();
+const createAuditLogMock = vi.fn();
 
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/auth', () => ({ getSessionFromRequest: getSessionFromRequestMock }));
+vi.mock('@/lib/audit', () => ({ createAuditLog: createAuditLogMock }));
 
 describe('Team roster management API', () => {
   beforeEach(() => {
@@ -33,13 +36,22 @@ describe('Team roster management API', () => {
     });
     prismaMock.user.findUnique.mockResolvedValueOnce({
       id: 'captain-1',
+      email: 'captain@example.com',
       role: 'CAPTAIN',
       fullName: 'Captain One',
       isActive: true,
     });
     prismaMock.team.findUnique
       .mockResolvedValueOnce({ captainId: 'captain-1' })
-      .mockResolvedValueOnce({ captainId: 'captain-1' });
+      .mockResolvedValueOnce({
+        captainId: 'captain-1',
+        season: {
+          id: 'season-1',
+          name: 'Spring 2026',
+          maxRosterSize: 16,
+        },
+      });
+    prismaMock.teamPlayer.count.mockResolvedValueOnce(4);
     prismaMock.teamPlayer.findUnique.mockResolvedValueOnce({
       userId: 'player-1',
       teamId: 'team-1',
@@ -69,6 +81,7 @@ describe('Team roster management API', () => {
     expect(response.status).toBe(200);
     expect(payload.status).toBe('APPROVED');
     expect(prismaMock.teamPlayer.update).toHaveBeenCalled();
+    expect(createAuditLogMock).toHaveBeenCalled();
   });
 
   it('prevents removing the team captain from the roster route', async () => {
@@ -79,6 +92,7 @@ describe('Team roster management API', () => {
     });
     prismaMock.user.findUnique.mockResolvedValueOnce({
       id: 'admin-1',
+      email: 'admin@example.com',
       role: 'ADMIN',
       fullName: 'Admin One',
       isActive: true,
@@ -88,7 +102,14 @@ describe('Team roster management API', () => {
       teamId: 'team-1',
       status: 'APPROVED',
     });
-    prismaMock.team.findUnique.mockResolvedValueOnce({ captainId: 'captain-1' });
+    prismaMock.team.findUnique.mockResolvedValueOnce({
+      captainId: 'captain-1',
+      season: {
+        id: 'season-1',
+        name: 'Spring 2026',
+        maxRosterSize: 16,
+      },
+    });
 
     const { PATCH } = await import('@/app/api/teams/[id]/players/route');
     const response = await PATCH(

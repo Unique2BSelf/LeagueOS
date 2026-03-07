@@ -179,7 +179,6 @@ export async function PATCH(
       email,
       phone,
       role,
-      teamId,
       isInsured,
       isActive,
       hideFromDirectory,
@@ -204,32 +203,6 @@ export async function PATCH(
     if (isInsured !== undefined) updateData.isInsured = isInsured;
     if (isActive !== undefined) updateData.isActive = isActive;
     if (hideFromDirectory !== undefined) updateData.hideFromDirectory = hideFromDirectory;
-    
-    // Handle team assignment
-    if (teamId !== undefined) {
-      if (teamId === null) {
-        // Remove team assignment - delete all teamPlayer records
-        await prisma.teamPlayer.deleteMany({
-          where: { userId: id },
-        });
-      } else {
-        // Add or update team assignment
-        await prisma.teamPlayer.upsert({
-          where: {
-            userId_teamId: {
-              userId: id,
-              teamId,
-            },
-          },
-          update: { status: 'ACTIVE' },
-          create: {
-            userId: id,
-            teamId,
-            status: 'ACTIVE',
-          },
-        });
-      }
-    }
     
     const user = await prisma.user.update({
       where: { id },
@@ -257,7 +230,6 @@ export async function PATCH(
         isActive: user.isActive,
         hideFromDirectory: user.hideFromDirectory,
       },
-      notes: teamId !== undefined ? `Team assignment updated to ${teamId ?? 'none'}` : null,
     });
     
     return NextResponse.json({

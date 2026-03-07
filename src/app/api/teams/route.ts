@@ -1,49 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSessionFromRequest } from '@/lib/auth';
-
-async function ensureDefaultSeasonAndDivision() {
-  let season = await prisma.season.findFirst({
-    orderBy: { startDate: 'desc' },
-    include: { divisions: true },
-  });
-
-  if (!season) {
-    season = await prisma.season.create({
-      data: {
-        name: `Open Season ${new Date().getFullYear()}`,
-        startDate: new Date(),
-        endDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 90),
-        minRosterSize: 8,
-        maxRosterSize: 16,
-        subQuota: 10,
-        divisions: {
-          create: {
-            name: 'Open',
-            level: 1,
-          },
-        },
-      },
-      include: { divisions: true },
-    });
-  }
-
-  if (!season.divisions.length) {
-    const division = await prisma.division.create({
-      data: {
-        name: 'Open',
-        level: 1,
-        seasonId: season.id,
-      },
-    });
-    season.divisions = [division];
-  }
-
-  return {
-    season,
-    division: season.divisions[0],
-  };
-}
+import { createAuditLog } from '@/lib/audit';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -64,6 +22,7 @@ export async function GET(request: NextRequest) {
     captainId: team.captainId,
     divisionId: team.divisionId,
     division: team.division?.name || 'Open',
+    divisionLevel: team.division?.level ?? null,
     seasonId: team.seasonId,
     seasonName: team.season?.name || 'Current Season',
     primaryColor: team.primaryColor,
@@ -71,8 +30,14 @@ export async function GET(request: NextRequest) {
     escrowTarget: team.escrowTarget,
     currentBalance: team.currentBalance,
     isConfirmed: team.isConfirmed,
+    approvalStatus: team.approvalStatus,
     playersCount: team.players.filter((player) => player.status === 'APPROVED').length,
-    openSlots: Math.max(0, 16 - team.players.filter((player) => player.status === 'APPROVED').length),
+    openSlots: Math.max(
+      0,
+      (team.season?.maxRosterSize ?? 16) - team.players.filter((player) => player.status === 'APPROVED').length,
+    ),
+    minRosterSize: team.season?.minRosterSize ?? 8,
+    maxRosterSize: team.season?.maxRosterSize ?? 16,
   }));
 
   if (action === 'available') {
@@ -91,7 +56,7 @@ export async function POST(request: NextRequest) {
 
     const user = await prisma.user.findUnique({
       where: { id: session.userId },
-      select: { id: true, role: true, fullName: true },
+      select: { id: true, role: true, fullName: true, email: true },
     });
 
     if (!user || (user.role !== 'CAPTAIN' && user.role !== 'ADMIN' && user.role !== 'MODERATOR')) {
@@ -101,21 +66,50 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { name, divisionId, primaryColor, secondaryColor, escrowTarget } = body;
 
-    if (!name) {
-      return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+    if (!name || !divisionId) {
+      return NextResponse.json({ error: 'Name and division are required' }, { status: 400 });
     }
 
-    const fallback = await ensureDefaultSeasonAndDivision();
-    const selectedDivision = divisionId
-      ? await prisma.division.findUnique({ where: { id: divisionId } })
-      : null;
+    const division = await prisma.division.findUnique({
+      where: { id: divisionId },
+      include: {
+        season: {
+          select: {
+            id: true,
+            isArchived: true,
+          },
+        },
+      },
+    });
 
-    const division = selectedDivision || fallback.division;
-    const seasonId = division.seasonId || fallback.season.id;
+    if (!division) {
+      return NextResponse.json({ error: 'Selected division was not found' }, { status: 404 });
+    }
+
+    if (division.season.isArchived) {
+      return NextResponse.json({ error: 'Cannot create teams in an archived season' }, { status: 409 });
+    }
+
+    const seasonId = division.season.id;
+
+    const existingTeam = await prisma.team.findFirst({
+      where: {
+        seasonId,
+        name: {
+          equals: String(name).trim(),
+          mode: 'insensitive',
+        },
+      },
+      select: { id: true },
+    });
+
+    if (existingTeam) {
+      return NextResponse.json({ error: 'A team with this name already exists in the selected season' }, { status: 409 });
+    }
 
     const team = await prisma.team.create({
       data: {
-        name,
+        name: String(name).trim(),
         captainId: user.id,
         divisionId: division.id,
         seasonId,
@@ -139,6 +133,24 @@ export async function POST(request: NextRequest) {
         userId: user.id,
         teamId: team.id,
         status: 'APPROVED',
+      },
+    });
+
+    await createAuditLog({
+      actor: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+      },
+      actionType: 'CREATE',
+      entityType: 'TEAM',
+      entityId: team.id,
+      after: {
+        name: team.name,
+        captainId: team.captainId,
+        divisionId: team.divisionId,
+        seasonId: team.seasonId,
       },
     });
 

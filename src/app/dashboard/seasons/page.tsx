@@ -60,13 +60,6 @@ export default function SeasonsPage() {
     } catch (error) {
       console.error('Failed to fetch seasons:', error);
     }
-    // Fallback to mock if API fails
-    if (seasons.length === 0) {
-      setSeasons([
-        { id: 'season-1', name: 'Spring 2026', startDate: '2026-03-01', endDate: '2026-06-30', isArchived: false, scoringSystem: 'TRADITIONAL', minRosterSize: 8, maxRosterSize: 16, subQuota: 10, divisions: 3, teams: 12 },
-        { id: 'season-2', name: 'Fall 2025', startDate: '2025-09-01', endDate: '2025-12-31', isArchived: true, scoringSystem: 'TRADITIONAL', minRosterSize: 8, maxRosterSize: 16, subQuota: 10, divisions: 3, teams: 10 },
-      ])
-    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -258,7 +251,7 @@ export default function SeasonsPage() {
         <h2 className="text-lg font-bold text-white mb-3">Active Seasons</h2>
         <div className="space-y-3 mb-8">
           {activeSeasons.map((season) => (
-            <div key={season.id} className="glass-card p-4 border-l-4 border-green-500">
+            <div key={season.id} className="glass-card p-4 border-l-4 border-green-500" data-testid={`season-card-${season.id}`}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 rounded-lg bg-green-500/20 flex items-center justify-center">
@@ -280,7 +273,7 @@ export default function SeasonsPage() {
                   <Link href={`/dashboard/seasons/${season.id}/registration`} className="p-2 hover:bg-white/10 rounded-lg" title="Registration Form">
                     <FileText className="w-5 h-5 text-cyan-400" />
                   </Link>
-                  <Link href={`/dashboard/seasons/${season.id}`} className="p-2 hover:bg-white/10 rounded-lg">
+                  <Link href={`/dashboard/seasons/${season.id}`} className="p-2 hover:bg-white/10 rounded-lg" title="Manage divisions" data-testid={`manage-season-${season.id}`}>
                     <Settings className="w-5 h-5 text-white/50" />
                   </Link>
                   <button onClick={() => archiveSeason(season.id)} className="p-2 hover:bg-white/10 rounded-lg">
