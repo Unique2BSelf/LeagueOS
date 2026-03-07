@@ -17,7 +17,8 @@ test.describe('MVP registration flow', () => {
     await page.getByRole('button', { name: 'Create Account' }).click();
 
     await page.waitForURL('**/dashboard');
-    await expect(page.getByRole('heading', { name: /Welcome back/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /control room/i })).toBeVisible();
+    await expect(page.getByText(/League control room/i)).toBeVisible();
   });
 
   test('player can start season registration and reach Stripe checkout', async ({ page }) => {
