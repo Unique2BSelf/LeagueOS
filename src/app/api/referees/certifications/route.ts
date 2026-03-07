@@ -1,6 +1,7 @@
 import { FileCategory, FileVisibility } from '@prisma/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSessionFromRequest } from '@/lib/auth';
 import { getDownloadUrl, validateUpload, writeUploadedFile } from '@/lib/file-storage';
 
 export const runtime = 'nodejs';
@@ -12,9 +13,9 @@ function isAdmin(role: string): boolean {
 }
 
 function getActor(request: NextRequest) {
-  const userId = request.headers.get('x-user-id');
-  const userRole = request.headers.get('x-user-role') || 'PLAYER';
-  return userId ? { userId, userRole } : null;
+  return getSessionFromRequest(request).then((session) => (
+    session ? { userId: session.userId, userRole: session.role } : null
+  ));
 }
 
 async function serializeCertification(certification: {
@@ -55,7 +56,7 @@ async function serializeCertification(certification: {
 
 export async function GET(request: NextRequest) {
   try {
-    const actor = getActor(request);
+    const actor = await getActor(request);
     if (!actor) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -83,7 +84,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const actor = getActor(request);
+    const actor = await getActor(request);
     if (!actor) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -147,7 +148,7 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const actor = getActor(request);
+    const actor = await getActor(request);
     if (!actor || !isAdmin(actor.userRole)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: actor ? 403 : 401 });
     }

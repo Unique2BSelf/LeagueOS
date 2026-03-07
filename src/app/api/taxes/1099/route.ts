@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getRefActor, getRefMatchRate } from '@/lib/referees';
 
 // Generate 1099-NEC PDF data for referees
 export async function GET(request: NextRequest) {
-  const userId = request.headers.get('x-user-id');
-  if (!userId) {
+  const actor = await getRefActor(request);
+  if (!actor || !actor.isActive) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: actor.id },
     });
 
     if (!user) {
@@ -21,25 +22,24 @@ export async function GET(request: NextRequest) {
     const year = new Date().getFullYear();
     const matches = await prisma.match.findMany({
       where: {
-        refId: userId,
+        refId: actor.id,
         status: 'FINAL',
         scheduledAt: {
           gte: new Date(`${year}-01-01`),
           lte: new Date(`${year}-12-31`),
         },
       },
-      include: { season: true },
+      include: {
+        homeTeam: { include: { division: true } },
+        awayTeam: { include: { division: true } },
+        season: true,
+      },
     });
-
-    const rates: Record<string, number> = {
-      'Premier': 75,
-      'Compete': 60,
-      'Recreational': 45,
-    };
 
     let totalEarnings = 0;
     const payments = matches.map(m => {
-      const rate = rates[m.season?.name || 'Recreational'] || 45;
+      const divisionLevel = m.homeTeam.division?.level ?? m.awayTeam.division?.level ?? 3;
+      const rate = getRefMatchRate(divisionLevel);
       totalEarnings += rate;
       return {
         date: m.scheduledAt,
@@ -87,14 +87,13 @@ export async function GET(request: NextRequest) {
 
 // Admin: Generate 1099 for any referee
 export async function POST(request: NextRequest) {
-  const userId = request.headers.get('x-user-id');
-  if (!userId) {
+  const actor = await getRefActor(request);
+  if (!actor || !actor.isActive) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   // Verify admin
-  const admin = await prisma.user.findUnique({ where: { id: userId } });
-  if (!admin || admin.role !== 'ADMIN') {
+  if (actor.role !== 'ADMIN') {
     return NextResponse.json({ error: 'Admin only' }, { status: 403 });
   }
 
@@ -118,17 +117,15 @@ export async function POST(request: NextRequest) {
           lte: new Date(`${taxYear}-12-31`),
         },
       },
-      include: { season: true },
+      include: {
+        homeTeam: { include: { division: true } },
+        awayTeam: { include: { division: true } },
+        season: true,
+      },
     });
 
-    const rates: Record<string, number> = {
-      'Premier': 75,
-      'Compete': 60,
-      'Recreational': 45,
-    };
-
     const totalEarnings = matches.reduce((sum, m) => 
-      sum + (rates[m.season?.name || 'Recreational'] || 45), 0);
+      sum + getRefMatchRate(m.homeTeam.division?.level ?? m.awayTeam.division?.level ?? 3), 0);
 
     return NextResponse.json({
       recipientName: targetUser.fullName,

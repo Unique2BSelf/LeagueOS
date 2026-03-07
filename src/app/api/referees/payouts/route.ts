@@ -1,47 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getRefActor, getRefMatchRate } from '@/lib/referees';
 
 export async function GET(request: NextRequest) {
-  const userId = request.headers.get('x-user-id');
-  if (!userId) {
+  const actor = await getRefActor(request);
+  if (!actor || !actor.isActive) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    // Get all matches the ref has worked
     const matches = await prisma.match.findMany({
-      where: { refId: userId, status: 'FINAL' },
+      where: { refId: actor.id, status: 'FINAL' },
       include: {
-        season: true,
+        homeTeam: { include: { division: true } },
+        awayTeam: { include: { division: true } },
       },
       orderBy: { scheduledAt: 'desc' },
     });
 
-    // Calculate payouts (example rates)
-    const rates: Record<string, number> = {
-      'Premier': 75,
-      'Compete': 60,
-      'Recreational': 45,
-    };
-
     let totalEarnings = 0;
-    const payoutHistory = matches.map(match => {
-      const division = match.season?.name || 'Recreational';
-      const rate = rates[division] || 45;
+    const payoutHistory = matches.map((match) => {
+      const divisionLevel = match.homeTeam.division?.level ?? match.awayTeam.division?.level ?? 3;
+      const rate = getRefMatchRate(divisionLevel);
       totalEarnings += rate;
+
       return {
         matchId: match.id,
         date: match.scheduledAt,
-        division,
+        division: divisionLevel === 1 ? 'Premier' : divisionLevel === 2 ? 'Competitive' : 'Recreational',
         rate,
         status: 'PAID',
       };
     });
 
-    // Get ledger entries for this ref
     const ledgers = await prisma.ledger.findMany({
-      where: { 
-        userId,
+      where: {
+        userId: actor.id,
         type: 'REF_PAYOUT',
       },
       orderBy: { createdAt: 'desc' },
@@ -52,7 +46,7 @@ export async function GET(request: NextRequest) {
       totalMatches: matches.length,
       payoutHistory,
       ledgers,
-      is1099Eligible: totalEarnings >= 2000,
+      is1099Eligible: totalEarnings >= 600,
       currentYearEarnings: totalEarnings,
     });
   } catch (error) {

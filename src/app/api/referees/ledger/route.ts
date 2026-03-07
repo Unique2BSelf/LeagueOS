@@ -1,18 +1,19 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getRefActor, getRefMatchRate } from '@/lib/referees';
 
 export async function GET(request: NextRequest) {
-  const userId = request.headers.get('x-user-id');
-  if (!userId) {
+  const actor = await getRefActor(request);
+  if (!actor || !actor.isActive) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
     const matches = await prisma.match.findMany({
-      where: { refId: userId },
+      where: { refId: actor.id },
       include: {
-        homeTeam: true,
-        awayTeam: true,
+        homeTeam: { include: { division: true } },
+        awayTeam: { include: { division: true } },
         season: true,
       },
       orderBy: { scheduledAt: 'desc' },
@@ -24,24 +25,19 @@ export async function GET(request: NextRequest) {
     const homeWins = matches.filter((match) => (match.homeScore ?? 0) > (match.awayScore ?? 0)).length;
     const awayWins = matches.filter((match) => (match.awayScore ?? 0) > (match.homeScore ?? 0)).length;
     const draws = matches.filter((match) => match.homeScore === match.awayScore).length;
-    const attendanceRate = 95;
+    const attendanceRate = totalMatches === 0 ? 0 : Math.round((completedMatches / totalMatches) * 100);
 
     const ledgers = await prisma.ledger.findMany({
-      where: { userId, type: 'REF_PAYOUT' },
+      where: { userId: actor.id, type: 'REF_PAYOUT' },
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
 
-    const rates: Record<string, number> = {
-      Premier: 75,
-      Compete: 60,
-      Recreational: 45,
-    };
-
     const earningsByDivision: Record<string, number> = {};
     matches.forEach((match) => {
-      const division = match.season?.name || 'Recreational';
-      earningsByDivision[division] = (earningsByDivision[division] || 0) + (rates[division] || 45);
+      const divisionLevel = match.homeTeam.division?.level ?? match.awayTeam.division?.level ?? 3;
+      const divisionName = divisionLevel === 1 ? 'Premier' : divisionLevel === 2 ? 'Competitive' : 'Recreational';
+      earningsByDivision[divisionName] = (earningsByDivision[divisionName] || 0) + getRefMatchRate(divisionLevel);
     });
 
     const totalEarnings = Object.values(earningsByDivision).reduce((sum, value) => sum + value, 0);
@@ -64,7 +60,7 @@ export async function GET(request: NextRequest) {
         date: match.scheduledAt,
         homeTeam: match.homeTeam.name,
         awayTeam: match.awayTeam.name,
-        score: String(match.homeScore ?? 0) + ' - ' + String(match.awayScore ?? 0),
+        score: `${match.homeScore ?? 0} - ${match.awayScore ?? 0}`,
         status: match.status,
       })),
     });
