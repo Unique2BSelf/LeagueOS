@@ -34,12 +34,22 @@ interface PaymentRecord {
   }
 }
 
+interface FineRecord {
+  id: string
+  amount: number
+  status: string
+  description?: string
+  createdAt: string
+}
+
 export default function PaymentsPage() {
   const { user, loading: userLoading } = useSessionUser()
   const [loading, setLoading] = useState(true)
   const [registrations, setRegistrations] = useState<RegistrationRecord[]>([])
   const [payments, setPayments] = useState<PaymentRecord[]>([])
+  const [fines, setFines] = useState<FineRecord[]>([])
   const [payingRegistration, setPayingRegistration] = useState<RegistrationRecord | null>(null)
+  const [payingFine, setPayingFine] = useState<FineRecord | null>(null)
 
   const fetchRegistrations = async () => {
     const res = await fetch('/api/registrations', { cache: 'no-store' })
@@ -55,13 +65,20 @@ export default function PaymentsPage() {
     setPayments(data)
   }
 
+  const fetchFines = async () => {
+    const res = await fetch('/api/ledger?type=FINE', { cache: 'no-store' })
+    if (!res.ok) return
+    const data = await res.json()
+    setFines(data)
+  }
+
   useEffect(() => {
     if (!user) {
       setLoading(false)
       return
     }
 
-    Promise.all([fetchRegistrations(), fetchPayments()]).finally(() => setLoading(false))
+    Promise.all([fetchRegistrations(), fetchPayments(), fetchFines()]).finally(() => setLoading(false))
   }, [user])
 
   useEffect(() => {
@@ -83,13 +100,14 @@ export default function PaymentsPage() {
       credentials: 'include',
       body: JSON.stringify({ sessionId }),
     })
-      .then(() => Promise.all([fetchRegistrations(), fetchPayments()]))
+      .then(() => Promise.all([fetchRegistrations(), fetchPayments(), fetchFines()]))
       .catch((error) => console.error('Failed to finalize checkout:', error))
   }, [user])
 
   const handlePaymentSuccess = async () => {
     setPayingRegistration(null)
-    await Promise.all([fetchRegistrations(), fetchPayments()])
+    setPayingFine(null)
+    await Promise.all([fetchRegistrations(), fetchPayments(), fetchFines()])
   }
 
   const stats = useMemo(() => {
@@ -137,6 +155,19 @@ export default function PaymentsPage() {
           </div>
         </div>
       )}
+      {payingFine && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="w-full max-w-md">
+            <PaymentForm
+              ledgerEntryId={payingFine.id}
+              amount={Number(payingFine.amount)}
+              seasonName={payingFine.description || 'Disciplinary Fine'}
+              onSuccess={handlePaymentSuccess}
+              onCancel={() => setPayingFine(null)}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="glass-card p-6">
         <h1 className="text-2xl font-bold text-white mb-2">My Payments</h1>
@@ -154,6 +185,39 @@ export default function PaymentsPage() {
           <div className="glass-card p-4 text-center">
             <p className="text-2xl font-bold text-cyan-400">${stats.outstandingAmount.toFixed(2)}</p>
             <p className="text-white/50 text-sm">Outstanding Amount</p>
+          </div>
+        </div>
+
+        <div className="mb-8">
+          <h2 className="text-lg font-bold text-white mb-3">Disciplinary Fines</h2>
+          <div className="space-y-3">
+            {fines.map((fine) => (
+              <div key={fine.id} className="glass-card p-4 border-l-4 border-red-500/40">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-white font-semibold">{fine.description || 'Disciplinary Fine'}</h3>
+                    <p className="text-white/50 text-sm">
+                      {new Date(fine.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xl font-bold text-red-400">${Number(fine.amount).toFixed(2)}</p>
+                    <p className={`text-sm ${fine.status === 'PAID' ? 'text-green-400' : 'text-yellow-400'}`}>
+                      {fine.status}
+                    </p>
+                    {fine.status !== 'PAID' && (
+                      <button onClick={() => setPayingFine(fine)} className="mt-2 btn-primary text-sm inline-flex items-center gap-2">
+                        <CreditCard className="w-4 h-4" />
+                        Pay Fine
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {fines.length === 0 && (
+              <div className="text-center py-8 text-white/40">No disciplinary fines.</div>
+            )}
           </div>
         </div>
 

@@ -1,11 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSessionFromRequest } from '@/lib/auth';
+import { syncDisciplinaryActionByLedger, syncDisciplinaryStateForUser } from '@/lib/discipline';
+
+async function getActor(request: NextRequest) {
+  const session = await getSessionFromRequest(request);
+  if (!session) {
+    return null;
+  }
+
+  return prisma.user.findUnique({
+    where: { id: session.userId },
+    select: {
+      id: true,
+      role: true,
+    },
+  });
+}
 
 // GET /api/ledger - List ledger entries
 export async function GET(request: NextRequest) {
   try {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) {
+    const actor = await getActor(request);
+    if (!actor) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -13,7 +30,7 @@ export async function GET(request: NextRequest) {
     const type = searchParams.get('type');
     const status = searchParams.get('status');
 
-    const where: any = { userId };
+    const where: any = { userId: actor.id };
     if (type) where.type = type;
     if (status) where.status = status;
 
@@ -32,14 +49,8 @@ export async function GET(request: NextRequest) {
 // POST /api/ledger - Create ledger entry (admin only)
 export async function POST(request: NextRequest) {
   try {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Check admin role
-    const admin = await prisma.user.findUnique({ where: { id: userId } });
-    if (!admin || admin.role !== 'ADMIN') {
+    const actor = await getActor(request);
+    if (!actor || actor.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 });
     }
 
@@ -60,13 +71,7 @@ export async function POST(request: NextRequest) {
 
     // If this is a FINE and amount > 0, lock the player
     if (type === 'FINE' && parseFloat(amount) > 0) {
-      await prisma.user.update({
-        where: { id: playerId },
-        data: {
-          isActive: false,
-          lockReason: description || 'Unpaid fine',
-        },
-      });
+      await syncDisciplinaryStateForUser(playerId);
     }
 
     return NextResponse.json(entry);
@@ -79,12 +84,32 @@ export async function POST(request: NextRequest) {
 // PATCH /api/ledger - Update entry (e.g., mark as paid)
 export async function PATCH(request: NextRequest) {
   try {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) {
+    const actor = await getActor(request);
+    if (!actor) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { entryId, status, releasePlayer } = await request.json();
+
+    const existingEntry = await prisma.ledger.findUnique({
+      where: { id: entryId },
+      select: {
+        id: true,
+        userId: true,
+        type: true,
+        status: true,
+      },
+    });
+
+    if (!existingEntry) {
+      return NextResponse.json({ error: 'Ledger entry not found' }, { status: 404 });
+    }
+
+    const isOwnerPayingFine = actor.id === existingEntry.userId && existingEntry.type === 'FINE' && status === 'PAID';
+    const isAdminOverride = actor.role === 'ADMIN' || actor.role === 'MODERATOR';
+    if (!isOwnerPayingFine && !isAdminOverride) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     const entry = await prisma.ledger.update({
       where: { id: entryId },
@@ -93,13 +118,11 @@ export async function PATCH(request: NextRequest) {
 
     // If marked as PAID and releasePlayer is true, unlock the player
     if (status === 'PAID' && releasePlayer) {
-      await prisma.user.update({
-        where: { id: entry.userId },
-        data: {
-          isActive: true,
-          lockReason: null,
-        },
-      });
+      await syncDisciplinaryStateForUser(entry.userId);
+    }
+
+    if (entry.type === 'FINE' && (status === 'PAID' || status === 'COMPLETED')) {
+      await syncDisciplinaryActionByLedger(entry.id);
     }
 
     return NextResponse.json(entry);

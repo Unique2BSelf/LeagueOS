@@ -5,14 +5,15 @@ import { CreditCard, Check, Loader2, AlertCircle, Lock, Apple, X, ExternalLink }
 import { getAuthHeaders } from '@/lib/client-auth'
 
 interface PaymentFormProps {
-  registrationId: string
+  registrationId?: string
+  ledgerEntryId?: string
   amount: number
   seasonName: string
   onSuccess: (paymentId: string) => void
   onCancel: () => void
 }
 
-export default function PaymentForm({ registrationId, amount, seasonName, onSuccess, onCancel }: PaymentFormProps) {
+export default function PaymentForm({ registrationId, ledgerEntryId, amount, seasonName, onSuccess, onCancel }: PaymentFormProps) {
   const [method, setMethod] = useState<'CARD' | 'APPLE_PAY'>('CARD')
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -31,7 +32,7 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
           'Content-Type': 'application/json',
           ...getAuthHeaders(),
         },
-        body: JSON.stringify({ registrationId, method }),
+        body: JSON.stringify({ registrationId, ledgerEntryId, method }),
       })
 
       const data = await res.json()
@@ -60,7 +61,7 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
           <Check className="w-8 h-8 text-green-400" />
         </div>
         <h3 className="text-xl font-bold text-white mb-2">Payment Successful!</h3>
-        <p className="text-white/60">Your registration for {seasonName} is confirmed.</p>
+        <p className="text-white/60">Your payment for {seasonName} is confirmed.</p>
       </div>
     )
   }
@@ -87,7 +88,7 @@ export default function PaymentForm({ registrationId, amount, seasonName, onSucc
       <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-4 mb-6">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-white/60 text-sm">Registration Fee</p>
+            <p className="text-white/60 text-sm">Payment Amount</p>
             <p className="text-white font-semibold">{seasonName}</p>
           </div>
           <p className="text-2xl font-bold text-cyan-400">${amount.toFixed(2)}</p>

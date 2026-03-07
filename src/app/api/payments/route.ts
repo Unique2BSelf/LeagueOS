@@ -47,19 +47,47 @@ async function findRegistrationWithSeason(registrationId: string) {
   });
 }
 
+async function findFineLedger(ledgerEntryId: string) {
+  return prisma.ledger.findUnique({
+    where: { id: ledgerEntryId },
+    include: {
+      user: {
+        select: {
+          fullName: true,
+          email: true,
+        },
+      },
+    },
+  });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const userId = request.headers.get('x-user-id');
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { registrationId, method = 'CARD' } = await request.json();
-    const registration = await findRegistrationWithSeason(registrationId);
+    const { registrationId, ledgerEntryId, method = 'CARD' } = await request.json();
+    const registration = registrationId ? await findRegistrationWithSeason(registrationId) : null;
+    const fineLedger = ledgerEntryId ? await findFineLedger(ledgerEntryId) : null;
 
-    if (!registration) return NextResponse.json({ error: 'Registration not found' }, { status: 404 });
-    if (registration.userId !== userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-    if (registration.paid) return NextResponse.json({ error: 'Already paid' }, { status: 400 });
+    if (!registration && !fineLedger) {
+      return NextResponse.json({ error: 'registrationId or ledgerEntryId is required' }, { status: 400 });
+    }
 
-    const existingPending = Array.from(paymentsDb.values()).find((payment) => payment.registrationId === registrationId && payment.status === 'PENDING');
+    if (registration) {
+      if (registration.userId !== userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+      if (registration.paid) return NextResponse.json({ error: 'Already paid' }, { status: 400 });
+    }
+
+    if (fineLedger) {
+      if (fineLedger.userId !== userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+      if (fineLedger.type !== 'FINE') return NextResponse.json({ error: 'Only fine ledger entries can be paid here' }, { status: 400 });
+      if (fineLedger.status === 'PAID' || fineLedger.status === 'COMPLETED') {
+        return NextResponse.json({ error: 'Fine already paid' }, { status: 400 });
+      }
+    }
+
+    const existingPending = Array.from(paymentsDb.values()).find((payment) => payment.registrationId === (registrationId || ledgerEntryId) && payment.status === 'PENDING');
     if (existingPending) {
       return NextResponse.json({
         paymentId: existingPending.id,
@@ -76,14 +104,24 @@ export async function POST(request: NextRequest) {
     if (normalizedMethod === 'CARD' || normalizedMethod === 'APPLE_PAY') {
       const stripe = getStripeClient();
       const origin = getRequestOrigin(request);
+      const amount = registration ? registration.amount : Number(fineLedger!.amount);
+      const description = registration
+        ? `${registration.season.name} Registration`
+        : 'League disciplinary fine';
+      const customerEmail = registration ? registration.user.email : fineLedger!.user.email;
       const checkoutSession = await stripe.checkout.sessions.create({
         mode: 'payment',
         success_url: `${origin}/dashboard/payments?payment=success&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${origin}/dashboard/payments?payment=cancelled&registrationId=${registration.id}`,
-        customer_email: registration.user.email,
+        cancel_url: `${origin}/dashboard/payments?payment=cancelled`,
+        customer_email: customerEmail,
         metadata: {
-          registrationId: registration.id,
-          seasonId: registration.seasonId,
+          ...(registration ? {
+            registrationId: registration.id,
+            seasonId: registration.seasonId,
+          } : {
+            ledgerEntryId: fineLedger!.id,
+            paymentKind: 'FINE',
+          }),
           userId,
         },
         line_items: [
@@ -91,10 +129,12 @@ export async function POST(request: NextRequest) {
             quantity: 1,
             price_data: {
               currency: 'usd',
-              unit_amount: Math.round(registration.amount * 100),
+              unit_amount: Math.round(amount * 100),
               product_data: {
-                name: `${registration.season.name} Registration`,
-                description: `League OS registration for ${registration.user.fullName}`,
+                name: description,
+                description: registration
+                  ? `League OS registration for ${registration.user.fullName}`
+                  : `Disciplinary fine for ${fineLedger!.user.fullName}`,
               },
             },
           },
@@ -103,10 +143,10 @@ export async function POST(request: NextRequest) {
 
       const payment: PaymentRecord = {
         id: paymentId,
-        registrationId,
+        registrationId: registrationId || ledgerEntryId,
         userId,
-        seasonId: registration.seasonId,
-        amount: registration.amount,
+        seasonId: registration?.seasonId || 'disciplinary',
+        amount: registration ? registration.amount : Number(fineLedger!.amount),
         method: normalizedMethod,
         status: 'PENDING',
         stripePaymentId: checkoutSession.id,
@@ -118,7 +158,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         paymentId,
-        amount: registration.amount,
+        amount: registration ? registration.amount : Number(fineLedger!.amount),
         checkoutUrl: checkoutSession.url,
         stripeSessionId: checkoutSession.id,
         method: normalizedMethod,
@@ -128,10 +168,10 @@ export async function POST(request: NextRequest) {
 
     const payment: PaymentRecord = {
       id: paymentId,
-      registrationId,
+      registrationId: registrationId || ledgerEntryId,
       userId,
-      seasonId: registration.seasonId,
-      amount: registration.amount,
+      seasonId: registration?.seasonId || 'disciplinary',
+      amount: registration ? registration.amount : Number(fineLedger!.amount),
       method: normalizedMethod,
       status: 'PENDING',
       createdAt: new Date(),
@@ -142,7 +182,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       paymentId,
-      amount: registration.amount,
+      amount: registration ? registration.amount : Number(fineLedger!.amount),
       method: normalizedMethod,
       message: `Payment method ${normalizedMethod} awaiting admin confirmation.`,
     });

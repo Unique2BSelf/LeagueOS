@@ -21,30 +21,48 @@ export async function POST(request: NextRequest) {
     const stripe = getStripeClient();
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     const registrationId = session.metadata?.registrationId;
+    const ledgerEntryId = session.metadata?.ledgerEntryId;
 
-    if (!registrationId) {
-      return NextResponse.json({ error: 'Missing registration metadata' }, { status: 400 });
+    if (!registrationId && !ledgerEntryId) {
+      return NextResponse.json({ error: 'Missing payment metadata' }, { status: 400 });
     }
 
-    const registration = await prisma.registration.findUnique({
-      where: { id: registrationId },
-    });
+    if (registrationId) {
+      const registration = await prisma.registration.findUnique({
+        where: { id: registrationId },
+      });
 
-    if (!registration) {
-      return NextResponse.json({ error: 'Registration not found' }, { status: 404 });
+      if (!registration) {
+        return NextResponse.json({ error: 'Registration not found' }, { status: 404 });
+      }
+
+      if (registration.userId !== userId) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
     }
 
-    if (registration.userId !== userId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (ledgerEntryId) {
+      const ledgerEntry = await prisma.ledger.findUnique({
+        where: { id: ledgerEntryId },
+      });
+
+      if (!ledgerEntry) {
+        return NextResponse.json({ error: 'Ledger entry not found' }, { status: 404 });
+      }
+
+      if (ledgerEntry.userId !== userId) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
     }
 
-    const finalized = await finalizeStripeCheckoutSession(session);
+    const finalized = await finalizeStripeCheckoutSession(session) as any;
 
     return NextResponse.json({
       success: true,
-      registrationId: finalized.id,
+      registrationId: registrationId || null,
+      ledgerEntryId: ledgerEntryId || null,
       paymentId: session.id,
-      status: 'APPROVED',
+      status: registrationId ? 'APPROVED' : 'PAID',
     });
   } catch (error) {
     console.error('Error completing Stripe checkout:', error);

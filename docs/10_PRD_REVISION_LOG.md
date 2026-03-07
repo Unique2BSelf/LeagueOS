@@ -94,6 +94,23 @@ Use this file for:
   - [communications API](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/api/admin/communications/route.ts)
   - [email lib](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/lib/email.ts)
 
+### Disciplinary Review, Fines, and Auto-Unlock Flow
+- Status: Implemented
+- Why: The original product intent required referee-reported cards, board/admin review, fine assignment, and player lock/unlock behavior, but the shipped implementation was a mock page with no persisted workflow.
+- Revision:
+  - referees can now create pending disciplinary reports
+  - moderators/admins review and approve or reject the report
+  - approval creates the fine ledger entry and locks the player
+  - players can pay the disciplinary fine through Stripe Checkout from the payments page
+  - once the fine is paid, the player is automatically unlocked and the disciplinary action is released
+  - admins can also create manual disciplinary actions outside a specific match
+- Affected implementation:
+  - [disciplinary API](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/api/disciplinary/route.ts)
+  - [disciplinary page](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/dashboard/disciplinary/page.tsx)
+  - [payments API](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/api/payments/route.ts)
+  - [payments page](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/dashboard/payments/page.tsx)
+  - [discipline lib](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/lib/discipline.ts)
+
 ### Reporting, Export, and Audit Logging
 - Status: Implemented
 - Why: The original PRD required operational reporting and traceability, but the product lacked a consistent audit trail and usable compliance reporting.

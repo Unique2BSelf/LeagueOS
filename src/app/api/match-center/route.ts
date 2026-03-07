@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { getSessionFromRequest } from '@/lib/auth';
 
 /**
  * Match Center API per PRD:
@@ -82,6 +84,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { matchId, action, ...data } = body;
+    const session = await getSessionFromRequest(request);
     
     if (!matchId) {
       return NextResponse.json({ error: 'matchId required' }, { status: 400 });
@@ -152,8 +155,29 @@ export async function POST(request: NextRequest) {
       }
       
       // Create disciplinary action for cards
-      if (data.type === 'RED_CARD' || data.type === 'YELLOW_CARD') {
-        // In production: create DisciplinaryAction in DB
+      if ((data.type === 'RED_CARD' || data.type === 'YELLOW_CARD') && data.playerId && session?.userId) {
+        const actor = await prisma.user.findUnique({
+          where: { id: session.userId },
+          select: { id: true, role: true },
+        });
+
+        if (actor && (actor.role === 'REF' || actor.role === 'ADMIN' || actor.role === 'MODERATOR')) {
+          const disciplinaryCardType = data.cardType || (data.type === 'RED_CARD' ? 'RED' : 'YELLOW_2');
+          const defaultFine = disciplinaryCardType === 'RED' ? 50 : 25;
+
+          await prisma.disciplinaryAction.create({
+            data: {
+              userId: data.playerId,
+              matchId,
+              cardType: disciplinaryCardType,
+              fineAmount: Number(data.fineAmount ?? defaultFine),
+              suspensionGames: Number(data.suspensionGames ?? (disciplinaryCardType === 'RED' ? 1 : 0)),
+              reportNotes: data.description || null,
+              source: 'MATCH_REPORT',
+              reportedById: actor.id,
+            },
+          });
+        }
       }
     }
     

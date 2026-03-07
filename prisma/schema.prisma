@@ -105,6 +105,12 @@ enum SubRequestStatus {
   CANCELLED
 }
 
+enum DisciplinaryStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
 enum TeamRosterStatus {
   DRAFT
   SUBMITTED
@@ -283,14 +289,25 @@ model DisciplinaryAction {
   userId        String
   matchId       String?
   cardType      String
+  status        DisciplinaryStatus  @default(PENDING_REVIEW)
   fineAmount    Float
   isPaid        Boolean             @default(false)
   isReleased    Boolean             @default(false)
   suspensionGames Int
+  source        String              @default("MATCH_REPORT")
+  notes         String?
+  reportNotes   String?
+  reportedById  String?
+  reviewedById  String?
+  reviewedAt    DateTime?
+  fineLedgerId  String?
   createdAt     DateTime            @default(now())
 
   user          User                @relation(fields: [userId], references: [id])
   match         Match?              @relation(fields: [matchId], references: [id])
+
+  @@index([userId, status])
+  @@index([matchId, status])
 }
 
 model Business {

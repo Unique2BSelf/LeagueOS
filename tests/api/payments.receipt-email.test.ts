@@ -16,6 +16,9 @@ const prismaMock = {
 const queueAndSendEmailMock = vi.fn();
 
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
+vi.mock('@/lib/discipline', () => ({
+  syncDisciplinaryActionByLedger: vi.fn(),
+}));
 vi.mock('@/lib/email', () => ({
   queueAndSendEmail: queueAndSendEmailMock,
   renderPaymentReceiptEmail: vi.fn(({ seasonName, amount, registrationId }) => ({
