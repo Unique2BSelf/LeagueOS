@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useMemo, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useSessionUser } from '@/hooks/use-session-user'
 import { AlertCircle, Loader2, Palette, Plus, Users } from 'lucide-react'
@@ -39,8 +39,9 @@ const colors = [
   { name: 'Gray', hex: '#808080' },
 ]
 
-export default function CreateTeamPage() {
+function CreateTeamPageContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user, loading: userLoading } = useSessionUser()
   const [loading, setLoading] = useState(false)
   const [bootstrapping, setBootstrapping] = useState(true)
@@ -68,7 +69,11 @@ export default function CreateTeamPage() {
         const activeSeasons = (Array.isArray(seasonsData) ? seasonsData : []).filter((season) => !season.isArchived)
         setSeasons(activeSeasons)
 
-        const defaultSeasonId = activeSeasons[0]?.id || ''
+        const requestedSeasonId = searchParams.get('seasonId')
+        const defaultSeasonId =
+          activeSeasons.find((season) => season.id === requestedSeasonId)?.id ||
+          activeSeasons[0]?.id ||
+          ''
         if (defaultSeasonId) {
           setFormData((current) => ({ ...current, seasonId: defaultSeasonId }))
         }
@@ -80,7 +85,7 @@ export default function CreateTeamPage() {
     }
 
     load()
-  }, [])
+  }, [searchParams])
 
   useEffect(() => {
     if (!formData.seasonId) {
@@ -98,10 +103,12 @@ export default function CreateTeamPage() {
 
         const divisionData = await divisionsRes.json()
         const nextDivisions = Array.isArray(divisionData) ? divisionData : []
+        const requestedDivisionId = searchParams.get('divisionId')
         setDivisions(nextDivisions)
         setFormData((current) => ({
           ...current,
           divisionId:
+            nextDivisions.find((division) => division.id === requestedDivisionId)?.id ||
             nextDivisions.find((division) => division.id === current.divisionId)?.id ||
             nextDivisions[0]?.id ||
             '',
@@ -112,7 +119,7 @@ export default function CreateTeamPage() {
     }
 
     loadDivisions()
-  }, [formData.seasonId])
+  }, [formData.seasonId, searchParams])
 
   const selectedDivision = useMemo(
     () => divisions.find((division) => division.id === formData.divisionId) || null,
@@ -384,5 +391,19 @@ export default function CreateTeamPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function CreateTeamPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-cyan-400" />
+        </div>
+      }
+    >
+      <CreateTeamPageContent />
+    </Suspense>
   )
 }

@@ -82,6 +82,8 @@ export async function GET(request: NextRequest) {
           teamId: t.teamId,
           teamName: t.team.name,
           status: t.status,
+          seasonId: t.team.seasonId,
+          divisionId: t.team.divisionId,
         })),
       })),
       stats,

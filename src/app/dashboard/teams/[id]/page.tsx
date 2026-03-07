@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { Users, Copy, RefreshCw, Check, Loader2, AlertCircle, ArrowLeft, Shield } from 'lucide-react'
+import { ArrowLeft, Check, Copy, Loader2, RefreshCw, Search, Shield, UserPlus, Users, X } from 'lucide-react'
 import { useSessionUser } from '@/hooks/use-session-user'
 
 interface Team {
@@ -11,13 +11,14 @@ interface Team {
   name: string
   captainId: string
   divisionId: string
-  division?: { name: string }
-  season?: { name: string }
+  division?: { id: string; name: string }
+  season?: { id: string; name: string; minRosterSize?: number; maxRosterSize?: number }
   primaryColor: string
   secondaryColor: string
   currentBalance: number
   escrowTarget: number
   isConfirmed: boolean
+  approvalStatus?: string
   inviteCode?: string | null
   inviteCodeExpiry?: Date | null
 }
@@ -33,6 +34,20 @@ interface Player {
   }
 }
 
+interface SearchUser {
+  id: string
+  fullName: string
+  email: string
+  role: string
+  teams: Array<{
+    teamId: string
+    teamName: string
+    status: string
+    seasonId?: string
+    divisionId?: string
+  }>
+}
+
 export default function TeamDashboardPage() {
   const params = useParams()
   const teamId = params.id as string
@@ -45,6 +60,12 @@ export default function TeamDashboardPage() {
   const [error, setError] = useState('')
   const [rosterActionLoading, setRosterActionLoading] = useState<string | null>(null)
   const [isCaptain, setIsCaptain] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [searchResults, setSearchResults] = useState<SearchUser[]>([])
+  const [searching, setSearching] = useState(false)
+
+  const approvedPlayers = useMemo(() => players.filter((player) => player.status === 'APPROVED'), [players])
+  const pendingPlayers = useMemo(() => players.filter((player) => player.status === 'PENDING'), [players])
 
   useEffect(() => {
     if (user) {
@@ -55,23 +76,60 @@ export default function TeamDashboardPage() {
     }
   }, [teamId, user, sessionLoading])
 
+  useEffect(() => {
+    if (!user || user.role !== 'ADMIN' || !team || searchTerm.trim().length < 2) {
+      setSearchResults([])
+      return
+    }
+
+    const controller = new AbortController()
+    const timeout = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const res = await fetch(`/api/users?search=${encodeURIComponent(searchTerm)}&limit=10`, {
+          signal: controller.signal,
+        })
+        if (!res.ok) {
+          throw new Error('Failed to search users')
+        }
+        const payload = await res.json()
+        const results = (payload.users || []).filter((candidate: SearchUser) => candidate.id !== user.id)
+        setSearchResults(results)
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          setError(err.message || 'Failed to search users')
+        }
+      } finally {
+        setSearching(false)
+      }
+    }, 250)
+
+    return () => {
+      clearTimeout(timeout)
+      controller.abort()
+    }
+  }, [searchTerm, team, user])
+
   const fetchTeamData = async (id: string, userId: string) => {
     setLoading(true)
     setError('')
-    
+
     try {
-      const teamRes = await fetch(`/api/teams/${id}`)
+      const [teamRes, playersRes] = await Promise.all([
+        fetch(`/api/teams/${id}`),
+        fetch(`/api/teams/${id}/players`),
+      ])
+
       if (!teamRes.ok) {
         setError('Team not found')
         setLoading(false)
         return
       }
-      
+
       const teamData = await teamRes.json()
       setTeam(teamData)
       setIsCaptain(teamData.captainId === userId)
-      
-      const playersRes = await fetch(`/api/teams/${id}/players`)
+
       if (playersRes.ok) {
         const playersData = await playersRes.json()
         setPlayers(playersData)
@@ -86,13 +144,13 @@ export default function TeamDashboardPage() {
   const generateInviteCode = async () => {
     setInviteLoading(true)
     setError('')
-    
+
     try {
       const res = await fetch(`/api/teams/${teamId}/invite`, {
         method: 'POST',
         credentials: 'include',
       })
-      
+
       if (res.ok) {
         const data = await res.json()
         setTeam((prev: any) => ({ ...prev, inviteCode: data.inviteCode, inviteCodeExpiry: data.expiresAt }))
@@ -110,13 +168,13 @@ export default function TeamDashboardPage() {
   const revokeInviteCode = async () => {
     setInviteLoading(true)
     setError('')
-    
+
     try {
       const res = await fetch(`/api/teams/${teamId}/invite`, {
         method: 'DELETE',
         credentials: 'include',
       })
-      
+
       if (res.ok) {
         setTeam((prev: any) => ({ ...prev, inviteCode: null, inviteCodeExpiry: null }))
       } else {
@@ -137,9 +195,6 @@ export default function TeamDashboardPage() {
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
-
-  const isInviteValid = team?.inviteCode && team?.inviteCodeExpiry && new Date(team.inviteCodeExpiry) > new Date()
-  const canManageRoster = isCaptain || user?.role === 'ADMIN'
 
   const updateRosterEntry = async (targetUserId: string, action: 'APPROVE' | 'REMOVE' | 'REJECT') => {
     setRosterActionLoading(`${action}-${targetUserId}`)
@@ -166,9 +221,39 @@ export default function TeamDashboardPage() {
     }
   }
 
+  const adminAssignToTeam = async (targetUser: SearchUser) => {
+    if (!team) return
+    setRosterActionLoading(`MOVE-${targetUser.id}`)
+    setError('')
+
+    try {
+      const res = await fetch('/api/admin/rosters', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: targetUser.id,
+          teamId: team.id,
+          action: 'MOVE',
+        }),
+      })
+      const payload = await res.json()
+      if (!res.ok) {
+        throw new Error(payload.error || 'Failed to roster player')
+      }
+
+      setSearchTerm('')
+      setSearchResults([])
+      await fetchTeamData(team.id, user!.id)
+    } catch (err: any) {
+      setError(err.message || 'Failed to roster player')
+    } finally {
+      setRosterActionLoading(null)
+    }
+  }
+
   if (sessionLoading || loading) {
     return (
-      <div className="flex items-center justify-center min-h-[50vh]">
+      <div className="flex min-h-[50vh] items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
       </div>
     )
@@ -176,11 +261,11 @@ export default function TeamDashboardPage() {
 
   if (error && !team) {
     return (
-      <div className="max-w-2xl mx-auto">
+      <div className="mx-auto max-w-2xl">
         <div className="glass-card p-8 text-center">
-          <AlertCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-white mb-2">Error</h1>
-          <p className="text-white/50 mb-6">{error}</p>
+          <X className="mx-auto mb-4 h-16 w-16 text-red-400" />
+          <h1 className="mb-2 text-2xl font-bold text-white">Error</h1>
+          <p className="mb-6 text-white/50">{error}</p>
           <Link href="/dashboard" className="btn-primary">
             Back to Dashboard
           </Link>
@@ -189,184 +274,263 @@ export default function TeamDashboardPage() {
     )
   }
 
+  const isInviteValid = team?.inviteCode && team?.inviteCodeExpiry && new Date(team.inviteCodeExpiry) > new Date()
+  const canManageRoster = isCaptain || user?.role === 'ADMIN'
+  const approvedCount = approvedPlayers.length
+  const pendingCount = pendingPlayers.length
+
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="mb-6">
-        <Link href="/teams" className="inline-flex items-center gap-2 text-white/50 hover:text-white mb-4">
-          <ArrowLeft className="w-4 h-4" />
-          Back to Teams
+    <div className="mx-auto max-w-6xl space-y-6">
+      <div className="mb-2">
+        <Link href={team?.season?.id ? `/dashboard/seasons/${team.season.id}` : '/teams'} className="mb-4 inline-flex items-center gap-2 text-white/50 hover:text-white">
+          <ArrowLeft className="h-4 w-4" />
+          {team?.season?.id ? 'Back to Season Team Stack' : 'Back to Teams'}
         </Link>
-        
-        <div className="flex items-center gap-4">
-          <div 
-            className="w-16 h-16 rounded-xl flex items-center justify-center text-2xl font-bold"
-            style={{ backgroundColor: team?.primaryColor || '#FF0000', color: team?.secondaryColor || '#FFFFFF' }}
-          >
-            {team?.name?.slice(0, 2).toUpperCase() || 'TM'}
-          </div>
-          <div>
-            <h1 className="text-3xl font-bold text-white">{team?.name}</h1>
-            <p className="text-white/50">{team?.division?.name || 'Open Division'} | {team?.season?.name || 'Current Season'}</p>
+
+        <div className="glass-card p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div
+                className="flex h-16 w-16 items-center justify-center rounded-xl text-2xl font-bold"
+                style={{ backgroundColor: team?.primaryColor || '#FF0000', color: team?.secondaryColor || '#FFFFFF' }}
+              >
+                {team?.name?.slice(0, 2).toUpperCase() || 'TM'}
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold text-white">{team?.name}</h1>
+                <p className="text-white/50">
+                  {team?.division?.name || 'Open Division'} | {team?.season?.name || 'Current Season'}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs text-white/40">
+                  <span>{approvedCount} approved players</span>
+                  <span>{pendingCount} pending</span>
+                  <span>Roster target {team?.season?.minRosterSize ?? 8}-{team?.season?.maxRosterSize ?? 16}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg bg-white/5 px-4 py-3 text-center">
+                <div className="text-xs uppercase tracking-wide text-white/40">Approval</div>
+                <div className="mt-1 text-white font-semibold">{team?.approvalStatus || 'PENDING'}</div>
+              </div>
+              <div className="rounded-lg bg-white/5 px-4 py-3 text-center">
+                <div className="text-xs uppercase tracking-wide text-white/40">Escrow</div>
+                <div className="mt-1 text-white font-semibold">${team?.currentBalance?.toFixed(0) || '0'}</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       {error && (
-        <div className="bg-red-500/20 border border-red-500 text-red-400 px-4 py-3 rounded-lg mb-6">
+        <div className="rounded-lg border border-red-500 bg-red-500/20 px-4 py-3 text-red-400">
           {error}
         </div>
       )}
 
-      {(isCaptain || user?.role === 'ADMIN') && (
-        <div className="glass-card p-6 mb-6">
-          <div className="flex items-center gap-2 mb-4">
-            <Users className="w-5 h-5 text-cyan-400" />
-            <h2 className="text-xl font-bold text-white">Invite Players</h2>
-          </div>
-          
-          <p className="text-white/50 mb-4">
-            Share this link with players you want to invite to your team. They'll be able to join directly using the invite code.
-          </p>
-
-          {team?.inviteCode && isInviteValid ? (
-            <div className="space-y-4">
-              <div className="bg-white/5 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-white/50 text-sm">Invite Code</span>
-                  <span className="text-green-400 text-sm flex items-center gap-1">
-                    <Check className="w-3 h-3" /> Valid
-                  </span>
-                </div>
-                <p className="text-2xl font-mono text-white font-bold tracking-wider">{team.inviteCode}</p>
-                <p className="text-white/40 text-xs mt-1">
-                  Expires: {new Date(team.inviteCodeExpiry!).toLocaleDateString()}
-                </p>
+      <div className="grid gap-6 xl:grid-cols-[1.2fr,0.8fr]">
+        <div className="space-y-6">
+          <div className="glass-card p-6">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="h-5 w-5 text-cyan-400" />
+                <h2 className="text-xl font-bold text-white">Roster</h2>
               </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={copyInviteLink}
-                  disabled={copied}
-                  className="flex-1 btn-secondary flex items-center justify-center gap-2"
-                >
-                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                  {copied ? 'Copied!' : 'Copy Invite Link'}
-                </button>
-                <button
-                  onClick={generateInviteCode}
-                  disabled={inviteLoading}
-                  className="btn-secondary flex items-center justify-center gap-2"
-                >
-                  {inviteLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                  New Code
-                </button>
-                <button
-                  onClick={revokeInviteCode}
-                  disabled={inviteLoading}
-                  className="btn-danger"
-                >
-                  Revoke
-                </button>
-              </div>
+              <span className="text-white/50">{players.length} members</span>
             </div>
-          ) : (
-            <button
-              onClick={generateInviteCode}
-              disabled={inviteLoading}
-              className="btn-primary flex items-center justify-center gap-2"
-            >
-              {inviteLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              Generate Invite Code
-            </button>
-          )}
-        </div>
-      )}
 
-      <div className="glass-card p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Users className="w-5 h-5 text-cyan-400" />
-            <h2 className="text-xl font-bold text-white">Team Roster</h2>
-          </div>
-          <span className="text-white/50">{players.length} players</span>
-        </div>
-
-        {players.length > 0 ? (
-          <div className="space-y-2">
-            {players.map((player) => (
-              <div key={player.userId} className="flex items-center justify-between gap-3 p-3 bg-white/5 rounded-lg" data-testid="team-roster-entry">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center">
-                    <Users className="w-5 h-5 text-cyan-400" />
-                  </div>
-                  <div>
-                    <p className="text-white font-medium">{player.user?.fullName || 'Unknown Player'}</p>
-                    <p className="text-white/40 text-xs">{player.user?.email}</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <span className={`text-xs px-2 py-1 rounded ${
-                    player.status === 'APPROVED' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
-                  }`}>
-                    {player.status}
-                  </span>
-                  {canManageRoster && (
-                    <div className="mt-2 flex justify-end gap-2">
-                      {player.status === 'PENDING' && (
-                        <>
-                          <button
-                            onClick={() => updateRosterEntry(player.userId, 'APPROVE')}
-                            disabled={!!rosterActionLoading}
-                            className="rounded-md bg-green-500/20 px-2 py-1 text-xs text-green-300 hover:bg-green-500/30 disabled:opacity-50"
-                            data-testid={`approve-player-${player.userId}`}
-                          >
-                            {rosterActionLoading === `APPROVE-${player.userId}` ? 'Approving...' : 'Approve'}
-                          </button>
-                          <button
-                            onClick={() => updateRosterEntry(player.userId, 'REJECT')}
-                            disabled={!!rosterActionLoading}
-                            className="rounded-md bg-red-500/20 px-2 py-1 text-xs text-red-300 hover:bg-red-500/30 disabled:opacity-50"
-                            data-testid={`reject-player-${player.userId}`}
-                          >
-                            {rosterActionLoading === `REJECT-${player.userId}` ? 'Rejecting...' : 'Reject'}
-                          </button>
-                        </>
-                      )}
-                      {player.status === 'APPROVED' && player.userId !== team?.captainId && (
-                        <button
-                          onClick={() => updateRosterEntry(player.userId, 'REMOVE')}
-                          disabled={!!rosterActionLoading}
-                          className="rounded-md bg-red-500/20 px-2 py-1 text-xs text-red-300 hover:bg-red-500/30 disabled:opacity-50"
-                          data-testid={`remove-player-${player.userId}`}
-                        >
-                          {rosterActionLoading === `REMOVE-${player.userId}` ? 'Removing...' : 'Remove'}
-                        </button>
+            {players.length > 0 ? (
+              <div className="space-y-2">
+                {players.map((player) => (
+                  <div key={player.userId} className="flex items-center justify-between gap-3 rounded-lg bg-white/5 p-3" data-testid="team-roster-entry">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cyan-500/20">
+                        <Users className="h-5 w-5 text-cyan-400" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-white">{player.user?.fullName || 'Unknown Player'}</p>
+                        <p className="text-xs text-white/40">{player.user?.email}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span
+                        className={`rounded px-2 py-1 text-xs ${
+                          player.status === 'APPROVED' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
+                        }`}
+                      >
+                        {player.status}
+                      </span>
+                      {canManageRoster && (
+                        <div className="mt-2 flex justify-end gap-2">
+                          {player.status === 'PENDING' && (
+                            <>
+                              <button
+                                onClick={() => updateRosterEntry(player.userId, 'APPROVE')}
+                                disabled={!!rosterActionLoading}
+                                className="rounded-md bg-green-500/20 px-2 py-1 text-xs text-green-300 hover:bg-green-500/30 disabled:opacity-50"
+                                data-testid={`approve-player-${player.userId}`}
+                              >
+                                {rosterActionLoading === `APPROVE-${player.userId}` ? 'Approving...' : 'Approve'}
+                              </button>
+                              <button
+                                onClick={() => updateRosterEntry(player.userId, 'REJECT')}
+                                disabled={!!rosterActionLoading}
+                                className="rounded-md bg-red-500/20 px-2 py-1 text-xs text-red-300 hover:bg-red-500/30 disabled:opacity-50"
+                                data-testid={`reject-player-${player.userId}`}
+                              >
+                                {rosterActionLoading === `REJECT-${player.userId}` ? 'Rejecting...' : 'Reject'}
+                              </button>
+                            </>
+                          )}
+                          {player.status === 'APPROVED' && player.userId !== team?.captainId && (
+                            <button
+                              onClick={() => updateRosterEntry(player.userId, 'REMOVE')}
+                              disabled={!!rosterActionLoading}
+                              className="rounded-md bg-red-500/20 px-2 py-1 text-xs text-red-300 hover:bg-red-500/30 disabled:opacity-50"
+                              data-testid={`remove-player-${player.userId}`}
+                            >
+                              {rosterActionLoading === `REMOVE-${player.userId}` ? 'Removing...' : 'Remove'}
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : (
+              <p className="py-8 text-center text-white/40">No players on this team yet</p>
+            )}
           </div>
-        ) : (
-          <p className="text-white/40 text-center py-8">No players on this team yet</p>
-        )}
-      </div>
 
-      <div className="glass-card p-6 mt-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Shield className="w-5 h-5 text-cyan-400" />
-          <h2 className="text-xl font-bold text-white">Team Info</h2>
+          {user?.role === 'ADMIN' && team && (
+            <div className="glass-card p-6">
+              <div className="mb-4 flex items-center gap-2">
+                <UserPlus className="h-5 w-5 text-cyan-400" />
+                <h2 className="text-xl font-bold text-white">Admin Roster Assignment</h2>
+              </div>
+              <p className="mb-4 text-sm text-white/50">
+                Search players and roster them directly onto this team without using an invite code. This is the usable admin flow.
+              </p>
+
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30" />
+                <input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search players by name or email"
+                  className="w-full rounded-lg border border-white/10 bg-white/5 py-3 pl-10 pr-4 text-white"
+                  data-testid="team-admin-search-input"
+                />
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {searching && <div className="text-sm text-white/50">Searching...</div>}
+                {!searching && searchTerm.trim().length >= 2 && searchResults.length === 0 && (
+                  <div className="text-sm text-white/40">No matching users found.</div>
+                )}
+                {searchResults.map((candidate) => {
+                  const currentSeasonTeam = candidate.teams.find((membership) => membership.seasonId === team.season?.id && membership.status === 'APPROVED')
+                  const alreadyOnThisTeam = currentSeasonTeam?.teamId === team.id
+                  return (
+                    <div key={candidate.id} className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 p-3" data-testid={`team-admin-search-result-${candidate.id}`}>
+                      <div>
+                        <div className="font-medium text-white">{candidate.fullName}</div>
+                        <div className="text-xs text-white/40">{candidate.email}</div>
+                        {currentSeasonTeam && (
+                          <div className="mt-1 text-xs text-amber-300">
+                            Currently on {currentSeasonTeam.teamName} for this season
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => adminAssignToTeam(candidate)}
+                        disabled={alreadyOnThisTeam || !!rosterActionLoading}
+                        className="rounded-md bg-cyan-500/20 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-500/30 disabled:opacity-50"
+                        data-testid={`team-admin-assign-${candidate.id}`}
+                      >
+                        {alreadyOnThisTeam ? 'Already on team' : rosterActionLoading === `MOVE-${candidate.id}` ? 'Assigning...' : currentSeasonTeam ? 'Move Here' : 'Add to Team'}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white/5 rounded-lg p-4">
-            <p className="text-white/50 text-sm">Current Balance</p>
-            <p className="text-2xl font-bold text-white">${team?.currentBalance?.toFixed(2) || '0.00'}</p>
-          </div>
-          <div className="bg-white/5 rounded-lg p-4">
-            <p className="text-white/50 text-sm">Escrow Target</p>
-            <p className="text-2xl font-bold text-white">${team?.escrowTarget?.toFixed(2) || '0.00'}</p>
+        <div className="space-y-6">
+          {(isCaptain || user?.role === 'ADMIN') && (
+            <div className="glass-card p-6">
+              <div className="mb-4 flex items-center gap-2">
+                <Users className="h-5 w-5 text-cyan-400" />
+                <h2 className="text-xl font-bold text-white">Invite Players</h2>
+              </div>
+
+              <p className="mb-4 text-white/50">
+                Invite codes are still available for captain-driven joins, but admins now also have direct roster assignment on this page.
+              </p>
+
+              {team?.inviteCode && isInviteValid ? (
+                <div className="space-y-4">
+                  <div className="rounded-lg bg-white/5 p-4">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-sm text-white/50">Invite Code</span>
+                      <span className="flex items-center gap-1 text-sm text-green-400">
+                        <Check className="h-3 w-3" /> Valid
+                      </span>
+                    </div>
+                    <p className="font-mono text-2xl font-bold tracking-wider text-white">{team.inviteCode}</p>
+                    <p className="mt-1 text-xs text-white/40">Expires: {new Date(team.inviteCodeExpiry!).toLocaleDateString()}</p>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button onClick={copyInviteLink} disabled={copied} className="btn-secondary flex-1 flex items-center justify-center gap-2">
+                      {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      {copied ? 'Copied!' : 'Copy Invite Link'}
+                    </button>
+                    <button onClick={generateInviteCode} disabled={inviteLoading} className="btn-secondary flex items-center justify-center gap-2">
+                      {inviteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      New Code
+                    </button>
+                    <button onClick={revokeInviteCode} disabled={inviteLoading} className="btn-danger">
+                      Revoke
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={generateInviteCode} disabled={inviteLoading} className="btn-primary flex items-center justify-center gap-2">
+                  {inviteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  Generate Invite Code
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="glass-card p-6">
+            <div className="mb-4 flex items-center gap-2">
+              <Shield className="h-5 w-5 text-cyan-400" />
+              <h2 className="text-xl font-bold text-white">Team Summary</h2>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="rounded-lg bg-white/5 p-4">
+                <p className="text-sm text-white/50">Current Balance</p>
+                <p className="text-2xl font-bold text-white">${team?.currentBalance?.toFixed(2) || '0.00'}</p>
+              </div>
+              <div className="rounded-lg bg-white/5 p-4">
+                <p className="text-sm text-white/50">Escrow Target</p>
+                <p className="text-2xl font-bold text-white">${team?.escrowTarget?.toFixed(2) || '0.00'}</p>
+              </div>
+              <div className="rounded-lg bg-white/5 p-4">
+                <p className="text-sm text-white/50">Approved Players</p>
+                <p className="text-2xl font-bold text-white">{approvedCount}</p>
+              </div>
+              <div className="rounded-lg bg-white/5 p-4">
+                <p className="text-sm text-white/50">Pending Players</p>
+                <p className="text-2xl font-bold text-white">{pendingCount}</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>

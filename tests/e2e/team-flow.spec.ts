@@ -32,7 +32,7 @@ async function bootstrapSession(page: import('@playwright/test').Page, options: 
 }
 
 test.describe('MVP team flow', () => {
-  test('admin can create a division, create a team in it, and roster a player without an invite code', async ({ browser, baseURL }) => {
+  test('admin can create a division, add a team from the season view, and roster a player directly on the team page', async ({ browser, baseURL }) => {
     const adminContext = await browser.newContext({ baseURL });
     const adminPage = await adminContext.newPage();
     const adminEmail = uniqueEmail('pw-division-admin');
@@ -70,8 +70,10 @@ test.describe('MVP team flow', () => {
     const divisionsPayload = await divisionsResponse.json();
     const createdDivision = divisionsPayload.find((division: { name: string }) => division.name === divisionName);
     expect(createdDivision?.id).toBeTruthy();
+    await expect(adminPage.getByTestId(`division-card-${createdDivision.id}`)).toContainText('No teams in this division yet.');
 
-    await adminPage.goto('/dashboard/teams/create');
+    await adminPage.getByTestId(`create-team-for-division-${createdDivision.id}`).click();
+    await adminPage.waitForURL(/\/dashboard\/teams\/create/);
     const teamName = `Division FC ${Date.now()}`;
     await adminPage.getByPlaceholder('Enter team name').fill(teamName);
     await adminPage.getByTestId('team-season-select').selectOption(seasonId!);
@@ -79,6 +81,8 @@ test.describe('MVP team flow', () => {
     await adminPage.getByRole('button', { name: 'Create Team' }).click();
     await adminPage.waitForURL((url) => /\/dashboard\/teams\/(?!create$)[^/]+$/.test(url.pathname));
     const createdTeamUrl = adminPage.url();
+    const createdTeamId = createdTeamUrl.split('/').pop();
+    expect(createdTeamId).toBeTruthy();
 
     const playerContext = await browser.newContext({ baseURL });
     const playerPage = await playerContext.newPage();
@@ -90,17 +94,15 @@ test.describe('MVP team flow', () => {
       role: 'PLAYER',
     });
 
-    await adminPage.goto('/dashboard/users');
-    await adminPage.getByPlaceholder('Search by name or email...').fill(playerEmail);
-    await adminPage.keyboard.press('Enter');
-    await adminPage.getByText('Playwright Assigned Player').click();
-    await adminPage.getByRole('button', { name: 'Teams' }).click();
-    await adminPage.getByTestId('admin-roster-team-select').selectOption({ label: `${teamName} | ${seasonName} | ${divisionName}` });
-    await adminPage.getByTestId('admin-roster-assign-button').click();
-    await expect(adminPage.locator('.p-4.bg-white\\/5.rounded-lg').filter({ hasText: teamName }).first()).toBeVisible();
+    await adminPage.getByTestId('team-admin-search-input').fill(playerEmail);
+    const assignButton = adminPage.getByTestId(/team-admin-assign-/).first();
+    await expect(assignButton).toBeVisible();
+    await assignButton.click();
 
     await adminPage.goto(createdTeamUrl);
     await expect(adminPage.getByTestId('team-roster-entry').filter({ hasText: 'Playwright Assigned Player' })).toBeVisible();
+    await adminPage.goto(`/dashboard/seasons/${seasonId}`);
+    await expect(adminPage.getByTestId(`season-team-card-${createdTeamId}`)).toContainText(teamName);
 
     await playerContext.close();
     await adminContext.close();
