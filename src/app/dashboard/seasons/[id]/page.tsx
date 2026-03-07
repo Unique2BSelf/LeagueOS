@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, Pencil, Plus, Shield, Trash2, Users } from 'lucide-react'
+import { AlertCircle, ArrowLeft, CheckCircle2, ChevronDown, ChevronRight, Loader2, Pencil, Plus, Shield, Trash2, Users } from 'lucide-react'
 
 type Season = {
   id: string
@@ -54,6 +54,7 @@ export default function SeasonDetailPage() {
   const [teamActionLoading, setTeamActionLoading] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [editingDivisionId, setEditingDivisionId] = useState<string | null>(null)
+  const [expandedDivisions, setExpandedDivisions] = useState<Record<string, boolean>>({})
   const [formData, setFormData] = useState({
     name: '',
     level: '1',
@@ -83,6 +84,15 @@ export default function SeasonDetailPage() {
       setSeason(seasonData)
       setDivisions(Array.isArray(divisionsData) ? divisionsData : [])
       setTeams(Array.isArray(teamsData) ? teamsData : [])
+      setExpandedDivisions((current) => {
+        const next = { ...current }
+        for (const division of Array.isArray(divisionsData) ? divisionsData : []) {
+          if (next[division.id] === undefined) {
+            next[division.id] = true
+          }
+        }
+        return next
+      })
     } catch (err: any) {
       setError(err.message || 'Failed to load season details')
     } finally {
@@ -103,6 +113,10 @@ export default function SeasonDetailPage() {
     }
     return grouped
   }, [teams])
+
+  const toggleDivision = (divisionId: string) => {
+    setExpandedDivisions((current) => ({ ...current, [divisionId]: !current[divisionId] }))
+  }
 
   const resetForm = () => {
     setFormData({ name: '', level: '1' })
@@ -227,10 +241,6 @@ export default function SeasonDetailPage() {
                 {new Date(season.startDate).toLocaleDateString()} -{' '}
                 {season.endDate ? new Date(season.endDate).toLocaleDateString() : 'Open ended'}
               </p>
-              <p className="mt-3 max-w-2xl text-sm text-white/45">
-                This page now acts as the season control room. Build divisions here, see the teams stacked under each division,
-                and jump directly into team creation or roster operations from the right place.
-              </p>
             </div>
             <div className="grid grid-cols-3 gap-3 text-center">
               <div className="rounded-lg bg-white/5 px-4 py-3">
@@ -336,7 +346,7 @@ export default function SeasonDetailPage() {
           <div className="mb-5 flex items-center justify-between gap-4">
             <div>
               <h2 className="text-xl font-bold text-white">Divisions and Teams</h2>
-              <p className="mt-1 text-sm text-white/45">Visual stack of each division with its teams and direct actions.</p>
+              <p className="mt-1 text-sm text-white/45">Condensed season view with divisions as headers and teams as compact rows underneath.</p>
             </div>
           </div>
 
@@ -348,18 +358,28 @@ export default function SeasonDetailPage() {
             <div className="space-y-4">
               {divisions.map((division) => {
                 const stackedTeams = divisionTeams.get(division.id) || []
+                const isExpanded = expandedDivisions[division.id] ?? true
                 return (
-                  <div key={division.id} className="rounded-2xl border border-white/10 bg-white/5 p-5" data-testid={`division-card-${division.id}`}>
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div>
-                        <h3 className="text-lg font-semibold text-white">{division.name}</h3>
-                        <p className="mt-1 text-sm text-white/50">Level {division.level}</p>
-                        <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/40">
+                  <div key={division.id} className="overflow-hidden rounded-2xl border border-white/10 bg-white/5" data-testid={`division-card-${division.id}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
+                      <button
+                        onClick={() => toggleDivision(division.id)}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                        data-testid={`toggle-division-${division.id}`}
+                      >
+                        <div className="rounded-lg bg-white/5 p-2 text-white/45">
+                          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="truncate text-base font-semibold text-white">{division.name}</h3>
+                          <div className="mt-1 flex flex-wrap gap-4 text-xs text-white/40">
+                            <span>Level {division.level}</span>
                           <span>{stackedTeams.length} teams</span>
                           <span>{division.playerCount} rostered players</span>
                           <span>Roster target {division.minRosterSize}-{division.maxRosterSize}</span>
                         </div>
-                      </div>
+                        </div>
+                      </button>
                       <div className="flex flex-wrap gap-2">
                         <Link
                           href={`/dashboard/teams/create?seasonId=${seasonId}&divisionId=${division.id}`}
@@ -385,28 +405,30 @@ export default function SeasonDetailPage() {
                       </div>
                     </div>
 
-                    <div className="mt-5 space-y-3">
+                    {isExpanded && (
+                      <div className="border-t border-white/10 bg-slate-950/25 px-3 py-3">
                       {stackedTeams.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-white/10 bg-slate-950/30 p-4 text-sm text-white/40">
                           No teams in this division yet.
                         </div>
                       ) : (
-                        stackedTeams.map((team) => {
+                        <div className="space-y-2">
+                          {stackedTeams.map((team) => {
                           const approvedRosterCount = team.players.filter((player) => player.status === 'APPROVED').length
                           const pendingRosterCount = team.players.filter((player) => player.status === 'PENDING').length
                           return (
-                            <div key={team.id} className="rounded-xl border border-white/10 bg-slate-950/35 p-4" data-testid={`season-team-card-${team.id}`}>
-                              <div className="flex flex-wrap items-start justify-between gap-4">
-                                <div className="flex items-start gap-3">
+                            <div key={team.id} className="rounded-xl border border-white/10 bg-slate-950/35 px-4 py-3" data-testid={`season-team-card-${team.id}`}>
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex min-w-0 items-center gap-3">
                                   <div
-                                    className="mt-1 flex h-12 w-12 items-center justify-center rounded-xl text-sm font-bold"
+                                    className="flex h-10 w-10 items-center justify-center rounded-xl text-xs font-bold"
                                     style={{ backgroundColor: team.primaryColor, color: team.secondaryColor }}
                                   >
                                     {team.name.slice(0, 2).toUpperCase()}
                                   </div>
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      <Link href={`/dashboard/teams/${team.id}`} className="text-base font-semibold text-white hover:text-cyan-200">
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <Link href={`/dashboard/teams/${team.id}`} className="truncate text-sm font-semibold text-white hover:text-cyan-200">
                                         {team.name}
                                       </Link>
                                       {team.approvalStatus === 'APPROVED' ? (
@@ -420,7 +442,7 @@ export default function SeasonDetailPage() {
                                         </span>
                                       )}
                                     </div>
-                                    <div className="mt-2 flex flex-wrap gap-4 text-xs text-white/40">
+                                    <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-white/40">
                                       <span>{approvedRosterCount} approved players</span>
                                       <span>{pendingRosterCount} pending</span>
                                       <span>{team.isConfirmed ? 'Confirmed' : 'Not confirmed'}</span>
@@ -430,7 +452,7 @@ export default function SeasonDetailPage() {
                                 <div className="flex flex-wrap gap-2">
                                   <Link
                                     href={`/dashboard/teams/${team.id}`}
-                                    className="rounded-md bg-white/10 px-3 py-2 text-sm text-white/80 hover:bg-white/15"
+                                    className="rounded-md bg-white/10 px-3 py-2 text-xs text-white/80 hover:bg-white/15"
                                   >
                                     Open Team
                                   </Link>
@@ -438,7 +460,7 @@ export default function SeasonDetailPage() {
                                     <button
                                       onClick={() => updateTeamApproval(team.id, 'APPROVE')}
                                       disabled={teamActionLoading !== null}
-                                      className="rounded-md bg-green-500/20 px-3 py-2 text-sm text-green-200 hover:bg-green-500/30 disabled:opacity-50"
+                                      className="rounded-md bg-green-500/20 px-3 py-2 text-xs text-green-200 hover:bg-green-500/30 disabled:opacity-50"
                                       data-testid={`approve-team-${team.id}`}
                                     >
                                       {teamActionLoading === `APPROVE-${team.id}` ? 'Approving...' : 'Approve Team'}
@@ -448,9 +470,11 @@ export default function SeasonDetailPage() {
                               </div>
                             </div>
                           )
-                        })
+                          })}
+                        </div>
                       )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}
