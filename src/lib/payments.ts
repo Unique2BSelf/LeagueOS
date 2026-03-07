@@ -3,6 +3,7 @@ import { PaymentMethod, PaymentStatus, TransactionType } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { queueAndSendEmail, renderPaymentReceiptEmail } from '@/lib/email';
 import { syncDisciplinaryActionByLedger } from '@/lib/discipline';
+import { resolveRegistrationStatus } from '@/lib/registrations';
 
 export type DurablePayment = {
   id: string;
@@ -87,13 +88,34 @@ async function markRegistrationPaid(payment: { id: string; registrationId: strin
     throw new Error('Registration not found');
   }
 
+  const activeInsurance = await prisma.insurancePolicy.findFirst({
+    where: {
+      userId: registration.userId,
+      status: 'ACTIVE',
+      endDate: { gt: new Date() },
+    },
+    orderBy: { endDate: 'desc' },
+  });
+
+  const insuranceStatus = activeInsurance
+    ? (activeInsurance.endDate <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) ? 'EXPIRING_SOON' : 'VALID')
+    : 'REQUIRED';
+
+  const nextStatus = resolveRegistrationStatus({
+    paid: true,
+    insuranceStatus,
+    currentStatus: registration.status,
+  });
+
   if (!registration.paid) {
     await prisma.registration.update({
       where: { id: registration.id },
       data: {
         paid: true,
         paymentId: providerPaymentId,
-        status: 'APPROVED',
+        status: nextStatus,
+        insuranceStatus,
+        insurancePurchasedAt: activeInsurance ? activeInsurance.startDate : registration.insurancePurchasedAt,
       },
     });
 

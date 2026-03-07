@@ -6,6 +6,10 @@ const prismaMock = {
     findFirst: vi.fn(),
     create: vi.fn(),
   },
+  registration: {
+    findMany: vi.fn(),
+    update: vi.fn(),
+  },
   user: {
     update: vi.fn(),
   },
@@ -35,6 +39,11 @@ describe('POST /api/insurance', () => {
       id: 'policy-1',
       ...data,
     }));
+    prismaMock.registration.findMany.mockResolvedValueOnce([
+      { id: 'reg-1', paid: true, status: 'PENDING' },
+      { id: 'reg-2', paid: false, status: 'PENDING' },
+    ]);
+    prismaMock.registration.update.mockResolvedValue({});
     prismaMock.user.update.mockResolvedValueOnce({});
 
     const { POST } = await import('@/app/api/insurance/route');
@@ -60,6 +69,31 @@ describe('POST /api/insurance', () => {
       where: { id: 'player-1' },
       data: expect.objectContaining({
         isInsured: true,
+      }),
+    });
+    expect(prismaMock.registration.findMany).toHaveBeenCalledWith({
+      where: {
+        userId: 'player-1',
+        status: { not: 'REJECTED' },
+      },
+      select: {
+        id: true,
+        paid: true,
+        status: true,
+      },
+    });
+    expect(prismaMock.registration.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 'reg-1' },
+      data: expect.objectContaining({
+        insuranceStatus: 'VALID',
+        status: 'APPROVED',
+      }),
+    });
+    expect(prismaMock.registration.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 'reg-2' },
+      data: expect.objectContaining({
+        insuranceStatus: 'VALID',
+        status: 'PENDING',
       }),
     });
   });

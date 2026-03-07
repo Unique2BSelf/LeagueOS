@@ -1,5 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { resolveRegistrationStatus } from '@/lib/registrations';
+
+async function syncRegistrationsForActiveInsurance(userId: string, startDate: Date, endDate: Date) {
+  const insuranceStatus = endDate <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) ? 'EXPIRING_SOON' : 'VALID';
+  const registrations = await prisma.registration.findMany({
+    where: {
+      userId,
+      status: { not: 'REJECTED' },
+    },
+    select: {
+      id: true,
+      paid: true,
+      status: true,
+    },
+  });
+
+  await Promise.all(registrations.map((registration) => (
+    prisma.registration.update({
+      where: { id: registration.id },
+      data: {
+        insuranceStatus,
+        insurancePurchasedAt: startDate,
+        status: resolveRegistrationStatus({
+          paid: registration.paid,
+          insuranceStatus,
+          currentStatus: registration.status,
+        }),
+      },
+    })
+  )));
+}
 
 // GET /api/insurance - Get user's current insurance status
 export async function GET(request: NextRequest) {
@@ -99,6 +130,8 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    await syncRegistrationsForActiveInsurance(userId, startDate, endDate);
+
     return NextResponse.json({
       policy,
       message: 'Insurance purchased successfully. Valid for 365 days.',
@@ -154,6 +187,8 @@ export async function PATCH(request: NextRequest) {
           insuranceExpiry: endDate,
         },
       });
+
+      await syncRegistrationsForActiveInsurance(userId, startDate, endDate);
 
       return NextResponse.json({
         policy: renewed,
