@@ -363,6 +363,20 @@ model Season {
   registrations Registration[]
   pricingTiers  PricingTier[]
   registrationForm RegistrationForm?
+  rulesDocument SeasonRulesDocument?
+}
+
+model SeasonRulesDocument {
+  id            String    @id @default(uuid())
+  seasonId      String    @unique
+  title         String
+  effectiveDate DateTime?
+  summary       String?
+  content       String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  season        Season    @relation(fields: [seasonId], references: [id])
 }
 
 model Division {

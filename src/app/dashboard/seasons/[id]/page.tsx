@@ -498,6 +498,13 @@ export default function SeasonDetailPage() {
                 <span>Generate Schedule For Season</span>
                 <ArrowLeft className="h-4 w-4 rotate-180" />
               </Link>
+              <Link
+                href={`/dashboard/seasons/${seasonId}/rules`}
+                className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white/75 transition hover:bg-white/10 hover:text-white"
+              >
+                <span>Edit Season Rules</span>
+                <ArrowLeft className="h-4 w-4 rotate-180" />
+              </Link>
             </div>
           </div>
         </div>

@@ -148,6 +148,18 @@ Use this file for:
   - [payments webhook](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/api/payments/webhook/route.ts)
   - [payments lib](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/lib/payments.ts)
 
+### Season-Specific Rules Management
+- Status: Implemented
+- Why: The public rules page was hardcoded and not season-aware, while league operations require admins to publish and revise rules per season.
+- Revision:
+  - added one rules document per season in the database
+  - admins can edit a season's public rules from season management
+  - public `/rules` now loads published rules by selected season instead of fixed placeholder copy
+- Affected implementation:
+  - [rules API](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/api/rules/route.ts)
+  - [season rules editor](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/dashboard/seasons/%5Bid%5D/rules/page.tsx)
+  - [public rules page](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/rules/page.tsx)
+
 ## Usage Notes
 
 - If a change corrects an error in the original PRD, update the PRD and record the correction here.

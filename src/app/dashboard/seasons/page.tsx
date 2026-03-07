@@ -273,6 +273,9 @@ export default function SeasonsPage() {
                   <Link href={`/dashboard/seasons/${season.id}/registration`} className="p-2 hover:bg-white/10 rounded-lg" title="Registration Form">
                     <FileText className="w-5 h-5 text-cyan-400" />
                   </Link>
+                  <Link href={`/dashboard/seasons/${season.id}/rules`} className="p-2 hover:bg-white/10 rounded-lg" title="Season Rules">
+                    <Edit className="w-5 h-5 text-amber-400" />
+                  </Link>
                   <Link href={`/dashboard/seasons/${season.id}`} className="p-2 hover:bg-white/10 rounded-lg" title="Manage divisions" data-testid={`manage-season-${season.id}`}>
                     <Settings className="w-5 h-5 text-white/50" />
                   </Link>
