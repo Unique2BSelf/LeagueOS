@@ -45,9 +45,11 @@ describe('Team roster management API', () => {
       .mockResolvedValueOnce({ captainId: 'captain-1' })
       .mockResolvedValueOnce({
         captainId: 'captain-1',
+        rosterStatus: 'DRAFT',
         season: {
           id: 'season-1',
           name: 'Spring 2026',
+          minRosterSize: 8,
           maxRosterSize: 16,
         },
       });
@@ -104,9 +106,11 @@ describe('Team roster management API', () => {
     });
     prismaMock.team.findUnique.mockResolvedValueOnce({
       captainId: 'captain-1',
+      rosterStatus: 'DRAFT',
       season: {
         id: 'season-1',
         name: 'Spring 2026',
+        minRosterSize: 8,
         maxRosterSize: 16,
       },
     });
@@ -124,5 +128,51 @@ describe('Team roster management API', () => {
     expect(response.status).toBe(400);
     expect(payload.error).toMatch(/captain cannot be removed/i);
     expect(prismaMock.teamPlayer.delete).not.toHaveBeenCalled();
+  });
+
+  it('blocks captains from changing a finalized roster until it is reopened', async () => {
+    getSessionFromRequestMock.mockResolvedValueOnce({
+      userId: 'captain-1',
+      role: 'CAPTAIN',
+      expiresAt: Date.now() + 60_000,
+    });
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      id: 'captain-1',
+      email: 'captain@example.com',
+      role: 'CAPTAIN',
+      fullName: 'Captain One',
+      isActive: true,
+    });
+    prismaMock.team.findUnique
+      .mockResolvedValueOnce({ captainId: 'captain-1' })
+      .mockResolvedValueOnce({
+        captainId: 'captain-1',
+        rosterStatus: 'FINALIZED',
+        season: {
+          id: 'season-1',
+          name: 'Spring 2026',
+          minRosterSize: 8,
+          maxRosterSize: 16,
+        },
+      });
+    prismaMock.teamPlayer.findUnique.mockResolvedValueOnce({
+      userId: 'player-1',
+      teamId: 'team-1',
+      status: 'PENDING',
+    });
+
+    const { PATCH } = await import('@/app/api/teams/[id]/players/route');
+    const response = await PATCH(
+      createJsonRequest('http://localhost/api/teams/team-1/players', {
+        method: 'PATCH',
+        body: { userId: 'player-1', action: 'APPROVE' },
+      }),
+      { params: Promise.resolve({ id: 'team-1' }) }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.error).toMatch(/finalized/i);
+    expect(prismaMock.teamPlayer.update).not.toHaveBeenCalled();
   });
 });

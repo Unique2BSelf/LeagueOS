@@ -49,7 +49,7 @@ test.describe('MVP team flow', () => {
         name: seasonName,
         startDate: '2026-03-01T00:00:00.000Z',
         endDate: '2026-06-30T00:00:00.000Z',
-        minRosterSize: 8,
+        minRosterSize: 2,
         maxRosterSize: 16,
         subQuota: 10,
       },
@@ -83,6 +83,13 @@ test.describe('MVP team flow', () => {
     const createdTeamUrl = adminPage.url();
     const createdTeamId = createdTeamUrl.split('/').pop();
     expect(createdTeamId).toBeTruthy();
+    const approveTeamResponse = await adminPage.request.patch('/api/admin/teams', {
+      data: {
+        teamIds: [createdTeamId],
+        action: 'APPROVE',
+      },
+    });
+    expect(approveTeamResponse.ok()).toBeTruthy();
 
     const playerContext = await browser.newContext({ baseURL });
     const playerPage = await playerContext.newPage();
@@ -101,8 +108,13 @@ test.describe('MVP team flow', () => {
 
     await adminPage.goto(createdTeamUrl);
     await expect(adminPage.getByTestId('team-roster-entry').filter({ hasText: 'Playwright Assigned Player' })).toBeVisible();
+    await adminPage.getByTestId('set-roster-status-submitted').click();
+    await expect(adminPage.getByTestId('team-roster-status-badge')).toContainText('SUBMITTED');
+    await adminPage.getByTestId('set-roster-status-finalized').click();
+    await expect(adminPage.getByTestId('team-roster-status-badge')).toContainText('FINALIZED');
     await adminPage.goto(`/dashboard/seasons/${seasonId}`);
     await expect(adminPage.getByTestId(`season-team-card-${createdTeamId}`)).toContainText(teamName);
+    await expect(adminPage.getByTestId(`season-team-card-${createdTeamId}`)).toContainText('FINALIZED');
 
     await playerContext.close();
     await adminContext.close();

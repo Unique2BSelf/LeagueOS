@@ -19,6 +19,7 @@ interface Team {
   escrowTarget: number
   isConfirmed: boolean
   approvalStatus?: string
+  rosterStatus?: 'DRAFT' | 'SUBMITTED' | 'FINALIZED'
   inviteCode?: string | null
   inviteCodeExpiry?: Date | null
 }
@@ -59,6 +60,7 @@ export default function TeamDashboardPage() {
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState('')
   const [rosterActionLoading, setRosterActionLoading] = useState<string | null>(null)
+  const [rosterStatusLoading, setRosterStatusLoading] = useState<string | null>(null)
   const [isCaptain, setIsCaptain] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState<SearchUser[]>([])
@@ -278,6 +280,40 @@ export default function TeamDashboardPage() {
   const canManageRoster = isCaptain || user?.role === 'ADMIN'
   const approvedCount = approvedPlayers.length
   const pendingCount = pendingPlayers.length
+  const minRosterSize = team?.season?.minRosterSize ?? 8
+  const maxRosterSize = team?.season?.maxRosterSize ?? 16
+  const rosterStatus = team?.rosterStatus || 'DRAFT'
+  const rosterStatusTone =
+    rosterStatus === 'FINALIZED'
+      ? 'bg-green-500/15 text-green-300'
+      : rosterStatus === 'SUBMITTED'
+        ? 'bg-cyan-500/15 text-cyan-300'
+        : 'bg-amber-500/15 text-amber-300'
+
+  const updateRosterStatus = async (nextStatus: 'DRAFT' | 'SUBMITTED' | 'FINALIZED') => {
+    if (!team) return
+    setRosterStatusLoading(nextStatus)
+    setError('')
+
+    try {
+      const res = await fetch(`/api/teams/${team.id}/roster-status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rosterStatus: nextStatus }),
+        credentials: 'include',
+      })
+      const payload = await res.json()
+      if (!res.ok) {
+        throw new Error(payload.error || 'Failed to update roster status')
+      }
+
+      setTeam((current) => current ? { ...current, rosterStatus: payload.rosterStatus } : current)
+    } catch (err: any) {
+      setError(err.message || 'Failed to update roster status')
+    } finally {
+      setRosterStatusLoading(null)
+    }
+  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -304,7 +340,7 @@ export default function TeamDashboardPage() {
                 <div className="mt-2 flex flex-wrap gap-3 text-xs text-white/40">
                   <span>{approvedCount} approved players</span>
                   <span>{pendingCount} pending</span>
-                  <span>Roster target {team?.season?.minRosterSize ?? 8}-{team?.season?.maxRosterSize ?? 16}</span>
+                  <span>Roster target {minRosterSize}-{maxRosterSize}</span>
                 </div>
               </div>
             </div>
@@ -317,6 +353,12 @@ export default function TeamDashboardPage() {
               <div className="rounded-lg bg-white/5 px-4 py-3 text-center">
                 <div className="text-xs uppercase tracking-wide text-white/40">Escrow</div>
                 <div className="mt-1 text-white font-semibold">${team?.currentBalance?.toFixed(0) || '0'}</div>
+              </div>
+              <div className="rounded-lg bg-white/5 px-4 py-3 text-center">
+                <div className="text-xs uppercase tracking-wide text-white/40">Official Roster</div>
+                <div className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${rosterStatusTone}`} data-testid="team-roster-status-badge">
+                  {rosterStatus}
+                </div>
               </div>
             </div>
           </div>
@@ -332,6 +374,46 @@ export default function TeamDashboardPage() {
       <div className="grid gap-6 xl:grid-cols-[1.2fr,0.8fr]">
         <div className="space-y-6">
           <div className="glass-card p-6">
+            <div className="mb-6 rounded-xl border border-white/10 bg-white/5 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-white/40">Official Roster Workflow</div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${rosterStatusTone}`}>
+                      {rosterStatus}
+                    </span>
+                    {approvedCount < minRosterSize && (
+                      <span className="rounded-full bg-red-500/15 px-3 py-1 text-xs text-red-300">
+                        Below minimum roster
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-2 text-sm text-white/50">
+                    Use Draft while building the team, Submitted when it is ready for league review, and Finalized once the official roster is locked.
+                  </p>
+                </div>
+                {canManageRoster && (
+                  <div className="flex flex-wrap gap-2">
+                    {(['DRAFT', 'SUBMITTED', 'FINALIZED'] as const).map((status) => (
+                      <button
+                        key={status}
+                        onClick={() => updateRosterStatus(status)}
+                        disabled={rosterStatusLoading !== null || rosterStatus === status}
+                        className={`rounded-md px-3 py-2 text-xs font-medium disabled:opacity-50 ${
+                          rosterStatus === status
+                            ? 'bg-white/15 text-white'
+                            : 'bg-cyan-500/15 text-cyan-200 hover:bg-cyan-500/25'
+                        }`}
+                        data-testid={`set-roster-status-${status.toLowerCase()}`}
+                      >
+                        {rosterStatusLoading === status ? 'Updating...' : status}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div className="mb-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Users className="h-5 w-5 text-cyan-400" />
@@ -439,8 +521,13 @@ export default function TeamDashboardPage() {
                         <div className="font-medium text-white">{candidate.fullName}</div>
                         <div className="text-xs text-white/40">{candidate.email}</div>
                         {currentSeasonTeam && (
-                          <div className="mt-1 text-xs text-amber-300">
+                        <div className="mt-1 text-xs text-amber-300">
                             Currently on {currentSeasonTeam.teamName} for this season
+                          </div>
+                        )}
+                        {team.rosterStatus === 'FINALIZED' && (
+                          <div className="mt-1 text-xs text-cyan-300">
+                            Admin override will reopen this finalized roster to Draft.
                           </div>
                         )}
                       </div>

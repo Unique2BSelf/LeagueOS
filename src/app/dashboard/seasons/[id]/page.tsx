@@ -39,6 +39,7 @@ type Team = {
   primaryColor: string
   secondaryColor: string
   approvalStatus: string
+  rosterStatus: 'DRAFT' | 'SUBMITTED' | 'FINALIZED'
   isConfirmed: boolean
   players: Array<{ userId: string; status: string }>
 }
@@ -58,6 +59,7 @@ export default function SeasonDetailPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [approvalFilter, setApprovalFilter] = useState<'ALL' | 'APPROVED' | 'PENDING'>('ALL')
   const [rosterFilter, setRosterFilter] = useState<'ALL' | 'NEEDS_PLAYERS' | 'AT_MIN'>('ALL')
+  const [workflowFilter, setWorkflowFilter] = useState<'ALL' | 'DRAFT' | 'SUBMITTED' | 'FINALIZED'>('ALL')
   const [sortMode, setSortMode] = useState<'name' | 'approved' | 'pending'>('name')
   const [formData, setFormData] = useState({
     name: '',
@@ -122,8 +124,10 @@ export default function SeasonDetailPage() {
       const matchesRoster =
         rosterFilter === 'ALL' ||
         (rosterFilter === 'NEEDS_PLAYERS' ? approvedRosterCount < (team.season?.minRosterSize ?? 8) : approvedRosterCount >= (team.season?.minRosterSize ?? 8))
+      const matchesWorkflow =
+        workflowFilter === 'ALL' || team.rosterStatus === workflowFilter
 
-      if (!matchesSearch || !matchesApproval || !matchesRoster) {
+      if (!matchesSearch || !matchesApproval || !matchesRoster || !matchesWorkflow) {
         continue
       }
 
@@ -151,7 +155,7 @@ export default function SeasonDetailPage() {
     }
 
     return grouped
-  }, [approvalFilter, rosterFilter, searchTerm, sortMode, teams])
+  }, [approvalFilter, rosterFilter, searchTerm, sortMode, teams, workflowFilter])
 
   const visibleTeamCount = useMemo(
     () => Array.from(divisionTeams.values()).reduce((total, divisionList) => total + divisionList.length, 0),
@@ -162,6 +166,12 @@ export default function SeasonDetailPage() {
     () => Array.from(divisionTeams.values()).flat().filter((team) => team.approvalStatus !== 'APPROVED').map((team) => team.id),
     [divisionTeams],
   )
+
+  const visibleTeamIdsByRosterStatus = useMemo(() => ({
+    DRAFT: Array.from(divisionTeams.values()).flat().filter((team) => team.rosterStatus === 'DRAFT').map((team) => team.id),
+    SUBMITTED: Array.from(divisionTeams.values()).flat().filter((team) => team.rosterStatus === 'SUBMITTED').map((team) => team.id),
+    FINALIZED: Array.from(divisionTeams.values()).flat().filter((team) => team.rosterStatus === 'FINALIZED').map((team) => team.id),
+  }), [divisionTeams])
 
   const toggleDivision = (divisionId: string) => {
     setExpandedDivisions((current) => ({ ...current, [divisionId]: !current[divisionId] }))
@@ -276,6 +286,39 @@ export default function SeasonDetailPage() {
       await loadSeason()
     } catch (err: any) {
       setError(err.message || 'Failed to bulk approve teams')
+    } finally {
+      setTeamActionLoading(null)
+    }
+  }
+
+  const bulkUpdateRosterStatus = async (nextStatus: 'DRAFT' | 'SUBMITTED' | 'FINALIZED') => {
+    const teamIds = nextStatus === 'DRAFT'
+      ? [...visibleTeamIdsByRosterStatus.SUBMITTED, ...visibleTeamIdsByRosterStatus.FINALIZED]
+      : visibleTeamIdsByRosterStatus[nextStatus === 'SUBMITTED' ? 'DRAFT' : 'SUBMITTED']
+
+    if (!teamIds.length) {
+      return
+    }
+
+    setTeamActionLoading(`BULK-${nextStatus}`)
+    setError('')
+    try {
+      const res = await fetch('/api/admin/teams', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          teamIds,
+          action: 'SET_ROSTER_STATUS',
+          rosterStatus: nextStatus,
+        }),
+      })
+      const payload = await res.json()
+      if (!res.ok) {
+        throw new Error(payload.error || `Failed to set roster status to ${nextStatus}`)
+      }
+      await loadSeason()
+    } catch (err: any) {
+      setError(err.message || `Failed to set roster status to ${nextStatus}`)
     } finally {
       setTeamActionLoading(null)
     }
@@ -431,7 +474,7 @@ export default function SeasonDetailPage() {
             </div>
           </div>
 
-          <div className="mb-5 grid gap-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4 lg:grid-cols-[1.2fr,0.8fr,0.8fr,0.8fr,auto]">
+          <div className="mb-5 grid gap-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4 xl:grid-cols-[1.1fr,0.75fr,0.75fr,0.75fr,0.75fr]">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30" />
               <input
@@ -468,12 +511,46 @@ export default function SeasonDetailPage() {
               <option value="approved">Sort by approved count</option>
               <option value="pending">Sort by pending count</option>
             </select>
+            <select
+              value={workflowFilter}
+              onChange={(e) => setWorkflowFilter(e.target.value as typeof workflowFilter)}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white"
+            >
+              <option value="ALL">All roster workflow</option>
+              <option value="DRAFT">Draft only</option>
+              <option value="SUBMITTED">Submitted only</option>
+              <option value="FINALIZED">Finalized only</option>
+            </select>
+          </div>
+
+          <div className="mb-5 flex flex-wrap gap-2">
             <button
               onClick={bulkApproveVisibleTeams}
               disabled={!pendingVisibleTeams.length || teamActionLoading !== null}
               className="rounded-lg bg-green-500/20 px-4 py-2.5 text-sm text-green-200 hover:bg-green-500/30 disabled:opacity-50"
             >
               {teamActionLoading === 'BULK-APPROVE' ? 'Approving...' : `Approve Visible (${pendingVisibleTeams.length})`}
+            </button>
+            <button
+              onClick={() => bulkUpdateRosterStatus('SUBMITTED')}
+              disabled={!visibleTeamIdsByRosterStatus.DRAFT.length || teamActionLoading !== null}
+              className="rounded-lg bg-cyan-500/20 px-4 py-2.5 text-sm text-cyan-200 hover:bg-cyan-500/30 disabled:opacity-50"
+            >
+              {teamActionLoading === 'BULK-SUBMITTED' ? 'Submitting...' : `Submit Visible Drafts (${visibleTeamIdsByRosterStatus.DRAFT.length})`}
+            </button>
+            <button
+              onClick={() => bulkUpdateRosterStatus('FINALIZED')}
+              disabled={!visibleTeamIdsByRosterStatus.SUBMITTED.length || teamActionLoading !== null}
+              className="rounded-lg bg-indigo-500/20 px-4 py-2.5 text-sm text-indigo-200 hover:bg-indigo-500/30 disabled:opacity-50"
+            >
+              {teamActionLoading === 'BULK-FINALIZED' ? 'Finalizing...' : `Finalize Visible Submitted (${visibleTeamIdsByRosterStatus.SUBMITTED.length})`}
+            </button>
+            <button
+              onClick={() => bulkUpdateRosterStatus('DRAFT')}
+              disabled={(!visibleTeamIdsByRosterStatus.SUBMITTED.length && !visibleTeamIdsByRosterStatus.FINALIZED.length) || teamActionLoading !== null}
+              className="rounded-lg bg-white/10 px-4 py-2.5 text-sm text-white/85 hover:bg-white/15 disabled:opacity-50"
+            >
+              {teamActionLoading === 'BULK-DRAFT' ? 'Reopening...' : `Reopen Visible (${visibleTeamIdsByRosterStatus.SUBMITTED.length + visibleTeamIdsByRosterStatus.FINALIZED.length})`}
             </button>
           </div>
 
@@ -576,6 +653,17 @@ export default function SeasonDetailPage() {
                                               Below min roster
                                             </span>
                                           )}
+                                          <span
+                                            className={`rounded-full px-2 py-1 text-xs ${
+                                              team.rosterStatus === 'FINALIZED'
+                                                ? 'bg-indigo-500/15 text-indigo-200'
+                                                : team.rosterStatus === 'SUBMITTED'
+                                                  ? 'bg-cyan-500/15 text-cyan-200'
+                                                  : 'bg-white/10 text-white/70'
+                                            }`}
+                                          >
+                                            {team.rosterStatus}
+                                          </span>
                                         </div>
                                         <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-white/40">
                                           <span>{approvedRosterCount} approved players</span>

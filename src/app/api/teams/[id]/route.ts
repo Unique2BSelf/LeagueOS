@@ -30,6 +30,8 @@ export async function GET(
         currentBalance: dbTeam.currentBalance,
         escrowTarget: dbTeam.escrowTarget,
         isConfirmed: dbTeam.isConfirmed,
+        approvalStatus: dbTeam.approvalStatus,
+        rosterStatus: dbTeam.rosterStatus,
         inviteCode: dbTeam.inviteCode,
         inviteCodeExpiry: dbTeam.inviteCodeExpiry,
       });

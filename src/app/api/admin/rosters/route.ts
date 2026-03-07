@@ -73,13 +73,22 @@ export async function PATCH(request: NextRequest) {
         return NextResponse.json({ error: 'Use team management to transfer captaincy before removing the captain' }, { status: 409 });
       }
 
-      await prisma.teamPlayer.delete({
-        where: {
-          userId_teamId: {
-            userId,
-            teamId,
+      await prisma.$transaction(async (tx) => {
+        await tx.teamPlayer.delete({
+          where: {
+            userId_teamId: {
+              userId,
+              teamId,
+            },
           },
-        },
+        });
+
+        if (membership.team.rosterStatus === 'FINALIZED') {
+          await tx.team.update({
+            where: { id: teamId },
+            data: { rosterStatus: 'DRAFT' },
+          });
+        }
       });
 
       await createAuditLog({
@@ -94,8 +103,13 @@ export async function PATCH(request: NextRequest) {
           status: membership.status,
           seasonId: membership.team.season.id,
           seasonName: membership.team.season.name,
+          previousRosterStatus: membership.team.rosterStatus,
         },
-        notes: note || 'Admin removed player from team roster',
+        notes:
+          note ||
+          (membership.team.rosterStatus === 'FINALIZED'
+            ? 'Admin removed player from a finalized roster and reopened it to draft'
+            : 'Admin removed player from team roster'),
       });
 
       return NextResponse.json({ success: true, action: 'REMOVE' });
@@ -209,6 +223,13 @@ export async function PATCH(request: NextRequest) {
           },
         });
       }
+
+      if (targetTeam.rosterStatus === 'FINALIZED') {
+        await tx.team.update({
+          where: { id: teamId },
+          data: { rosterStatus: 'DRAFT' },
+        });
+      }
     });
 
     await createAuditLog({
@@ -229,12 +250,16 @@ export async function PATCH(request: NextRequest) {
         seasonId: targetTeam.season.id,
         seasonName: targetTeam.season.name,
         status: 'APPROVED',
+        previousRosterStatus: targetTeam.rosterStatus,
+        nextRosterStatus: targetTeam.rosterStatus === 'FINALIZED' ? 'DRAFT' : targetTeam.rosterStatus,
       },
       notes:
         note ||
-        (action === 'MOVE'
-          ? 'Admin moved player between teams without invite code'
-          : 'Admin rostered player directly without invite code'),
+        (targetTeam.rosterStatus === 'FINALIZED'
+          ? 'Admin changed a finalized roster and reopened it to draft'
+          : action === 'MOVE'
+            ? 'Admin moved player between teams without invite code'
+            : 'Admin rostered player directly without invite code'),
     });
 
     return NextResponse.json({

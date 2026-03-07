@@ -31,6 +31,7 @@ export async function GET(request: NextRequest) {
     currentBalance: team.currentBalance,
     isConfirmed: team.isConfirmed,
     approvalStatus: team.approvalStatus,
+    rosterStatus: team.rosterStatus,
     playersCount: team.players.filter((player) => player.status === 'APPROVED').length,
     openSlots: Math.max(
       0,

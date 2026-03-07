@@ -109,6 +109,7 @@ export async function PATCH(
           select: {
             id: true,
             name: true,
+            minRosterSize: true,
             maxRosterSize: true,
           },
         },
@@ -117,6 +118,12 @@ export async function PATCH(
 
     if (!team) {
       return NextResponse.json({ error: 'Team not found' }, { status: 404 });
+    }
+
+    if (team.rosterStatus === 'FINALIZED' && actor.role !== 'ADMIN') {
+      return NextResponse.json({
+        error: 'This official roster is finalized. Reopen it before changing players.',
+      }, { status: 409 });
     }
 
     if (team.captainId === userId && action !== 'APPROVE') {
@@ -156,6 +163,13 @@ export async function PATCH(
         },
       });
 
+      if (team.rosterStatus === 'FINALIZED' && actor.role === 'ADMIN') {
+        await prisma.team.update({
+          where: { id: teamId },
+          data: { rosterStatus: 'DRAFT' },
+        });
+      }
+
       await createAuditLog({
         actor,
         actionType: 'APPROVE',
@@ -167,7 +181,12 @@ export async function PATCH(
           teamId,
           seasonId: team.season.id,
           seasonName: team.season.name,
+          previousRosterStatus: team.rosterStatus,
+          nextRosterStatus: team.rosterStatus === 'FINALIZED' && actor.role === 'ADMIN' ? 'DRAFT' : team.rosterStatus,
         },
+        notes: team.rosterStatus === 'FINALIZED' && actor.role === 'ADMIN'
+          ? 'Admin approved player and automatically reopened finalized roster to draft'
+          : undefined,
       });
 
       return NextResponse.json(updated);
@@ -183,6 +202,13 @@ export async function PATCH(
         },
       });
 
+      if (team.rosterStatus === 'FINALIZED' && actor.role === 'ADMIN') {
+        await prisma.team.update({
+          where: { id: teamId },
+          data: { rosterStatus: 'DRAFT' },
+        });
+      }
+
       await createAuditLog({
         actor,
         actionType: action === 'REJECT' ? 'REJECT' : 'DELETE',
@@ -194,8 +220,14 @@ export async function PATCH(
           teamId,
           seasonId: team.season.id,
           seasonName: team.season.name,
+          previousRosterStatus: team.rosterStatus,
         },
-        notes: action === 'REJECT' ? 'Captain/admin rejected join request' : 'Captain/admin removed rostered player',
+        notes:
+          team.rosterStatus === 'FINALIZED' && actor.role === 'ADMIN'
+            ? 'Admin changed a finalized roster and automatically reopened it to draft'
+            : action === 'REJECT'
+              ? 'Captain/admin rejected join request'
+              : 'Captain/admin removed rostered player',
       });
 
       return NextResponse.json({ success: true, removedUserId: userId, action });

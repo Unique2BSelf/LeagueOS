@@ -42,6 +42,31 @@ Use this file for:
   - [team create](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/dashboard/teams/create/page.tsx)
   - [team detail](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/dashboard/teams/%5Bid%5D/page.tsx)
 
+### Official Roster Lifecycle and Bulk Team Operations
+- Status: Implemented
+- Why: The original PRD and later MVP discussion required league-usable roster administration, but the product still lacked a formal team roster lifecycle and bulk operator controls.
+- Revision:
+  - teams now carry an explicit official roster lifecycle:
+    - `DRAFT`
+    - `SUBMITTED`
+    - `FINALIZED`
+  - season operations page now supports:
+    - search
+    - approval filtering
+    - roster fullness filtering
+    - roster workflow filtering
+    - bulk approval
+    - bulk submission/finalization/reopen actions
+  - team page now exposes official roster lifecycle controls directly where captains and admins manage the roster
+  - finalized rosters are protected from captain edits until reopened
+  - admin override edits automatically reopen finalized rosters and are audited
+- Affected implementation:
+  - [season detail](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/dashboard/seasons/%5Bid%5D/page.tsx)
+  - [team detail](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/dashboard/teams/%5Bid%5D/page.tsx)
+  - [admin teams API](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/api/admin/teams/route.ts)
+  - [team roster status API](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/api/teams/%5Bid%5D/roster-status/route.ts)
+  - [team roster API](/C:/Users/25K%20Gamer/Documents/LeagueOS/src/app/api/teams/%5Bid%5D/players/route.ts)
+
 ### Admin Direct Roster Assignment
 - Status: Implemented
 - Why: League administrators need a direct override path that does not depend on invite codes or captain-mediated join requests.
