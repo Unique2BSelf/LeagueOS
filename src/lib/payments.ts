@@ -211,7 +211,7 @@ async function markFinePaid(payment: { id: string; ledgerEntryId: string; amount
   return ledgerEntry;
 }
 
-async function markInsurancePaid(payment: { id: string; userId: string; amount: number; notes?: string | null }, providerPaymentId: string, provider?: string | null) {
+async function markInsurancePaid(payment: { id: string; userId: string; amount: number; notes?: string | null; ledgerEntryId?: string | null }, providerPaymentId: string, provider?: string | null) {
   const user = await prisma.user.findUnique({
     where: { id: payment.userId },
     select: {
@@ -231,31 +231,45 @@ async function markInsurancePaid(payment: { id: string; userId: string; amount: 
     stripePaymentId: providerPaymentId,
   });
 
-  await prisma.ledger.create({
-    data: {
-      userId: payment.userId,
-      amount: payment.amount,
-      type: 'INSURANCE',
-      status: 'COMPLETED',
-      year: new Date().getFullYear(),
-      description: 'Annual insurance payment received',
-    },
-  });
+  let ledgerEntryId = payment.ledgerEntryId || null;
 
-  await queueAndSendEmail({
-    toEmail: user.email,
-    toName: user.fullName,
-    subject: 'Annual insurance payment received',
-    htmlBody: `<p>We received your annual insurance payment of $${payment.amount.toFixed(2)}. Coverage is active through ${policy.endDate.toLocaleDateString()}.</p>`,
-    textBody: `We received your annual insurance payment of $${payment.amount.toFixed(2)}. Coverage is active through ${policy.endDate.toLocaleDateString()}.`,
-    templateType: 'PAYMENT_RECEIPT',
-    metadata: {
-      paymentId: payment.id,
-      providerPaymentId,
-      policyId: policy.id,
-      amount: payment.amount,
-    },
-  });
+  if (!ledgerEntryId) {
+    const ledger = await prisma.ledger.create({
+      data: {
+        userId: payment.userId,
+        amount: payment.amount,
+        type: 'INSURANCE',
+        status: 'COMPLETED',
+        year: new Date().getFullYear(),
+        description: 'Annual insurance payment received',
+      },
+    });
+
+    ledgerEntryId = ledger.id;
+
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: {
+        ledgerEntryId,
+      },
+    });
+
+    await queueAndSendEmail({
+      toEmail: user.email,
+      toName: user.fullName,
+      subject: 'Annual insurance payment received',
+      htmlBody: `<p>We received your annual insurance payment of $${payment.amount.toFixed(2)}. Coverage is active through ${policy.endDate.toLocaleDateString()}.</p>`,
+      textBody: `We received your annual insurance payment of $${payment.amount.toFixed(2)}. Coverage is active through ${policy.endDate.toLocaleDateString()}.`,
+      templateType: 'PAYMENT_RECEIPT',
+      metadata: {
+        paymentId: payment.id,
+        providerPaymentId,
+        policyId: policy.id,
+        ledgerEntryId,
+        amount: payment.amount,
+      },
+    });
+  }
 
   return policy;
 }
@@ -291,20 +305,20 @@ export async function finalizeStripeCheckoutSession(session: Stripe.Checkout.Ses
     });
   }
 
+  if (payment.transactionType === TransactionType.INSURANCE || payment.notes === 'ANNUAL_INSURANCE' || session.metadata?.paymentKind === 'INSURANCE') {
+    return markInsurancePaid(
+      { id: payment.id, userId: payment.userId, amount: payment.amount, notes: payment.notes, ledgerEntryId: payment.ledgerEntryId },
+      paymentIntentId || session.id,
+      session.metadata?.provider || null,
+    );
+  }
+
   if (payment.registrationId) {
     return markRegistrationPaid({ id: payment.id, registrationId: payment.registrationId, amount: payment.amount, userId: payment.userId }, paymentIntentId || session.id);
   }
 
   if (payment.ledgerEntryId) {
     return markFinePaid({ id: payment.id, ledgerEntryId: payment.ledgerEntryId, amount: payment.amount }, paymentIntentId || session.id);
-  }
-
-  if (payment.transactionType === TransactionType.INSURANCE || payment.notes === 'ANNUAL_INSURANCE' || session.metadata?.paymentKind === 'INSURANCE') {
-    return markInsurancePaid(
-      { id: payment.id, userId: payment.userId, amount: payment.amount, notes: payment.notes },
-      paymentIntentId || session.id,
-      session.metadata?.provider || null,
-    );
   }
 
   throw new Error('Payment is not linked to a supported target');
