@@ -3,8 +3,9 @@
 This is the canonical pre-live tracker for LeagueOS. It supersedes older implied launch-readiness claims in summary docs.
 
 Reference:
-- Baseline spec: [00_PRODUCT_VISION_PRD.md](/C:/Users/25K%20Gamer/Documents/LeagueOS/docs/00_PRODUCT_VISION_PRD.md)
-- Product revisions and additions: [10_PRD_REVISION_LOG.md](/C:/Users/25K%20Gamer/Documents/LeagueOS/docs/10_PRD_REVISION_LOG.md)
+- Baseline spec: [00_PRODUCT_VISION_PRD.md](/C:/Users/25K%20Gamer/Documents/LeagueOS-main/docs/00_PRODUCT_VISION_PRD.md)
+- Product revisions and additions: [10_PRD_REVISION_LOG.md](/C:/Users/25K%20Gamer/Documents/LeagueOS-main/docs/10_PRD_REVISION_LOG.md)
+- Current implementation handoff: [11_CURRENT_STATE_HANDOFF.md](/C:/Users/25K%20Gamer/Documents/LeagueOS-main/docs/11_CURRENT_STATE_HANDOFF.md)
 
 ## Active Items
 

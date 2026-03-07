@@ -1,6 +1,9 @@
 # PRD Revision Log
 
-This document tracks material additions, corrections, and workflow revisions that have been implemented after the baseline PRD in [00_PRODUCT_VISION_PRD.md](/C:/Users/25K%20Gamer/Documents/LeagueOS/docs/00_PRODUCT_VISION_PRD.md).
+This document tracks material additions, corrections, and workflow revisions that have been implemented after the baseline PRD in [00_PRODUCT_VISION_PRD.md](/C:/Users/25K%20Gamer/Documents/LeagueOS-main/docs/00_PRODUCT_VISION_PRD.md).
+
+Current execution handoff:
+- [11_CURRENT_STATE_HANDOFF.md](/C:/Users/25K%20Gamer/Documents/LeagueOS-main/docs/11_CURRENT_STATE_HANDOFF.md)
 
 Use this file for:
 - product behavior added after the original PRD was written
