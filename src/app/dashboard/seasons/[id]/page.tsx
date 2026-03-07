@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { AlertCircle, ArrowLeft, CheckCircle2, ChevronDown, ChevronRight, Loader2, Pencil, Plus, Shield, Trash2, Users } from 'lucide-react'
+import { AlertCircle, ArrowLeft, CheckCircle2, ChevronDown, ChevronRight, Loader2, Pencil, Plus, Search, Shield, Trash2, Users } from 'lucide-react'
 
 type Season = {
   id: string
@@ -35,7 +35,7 @@ type Team = {
   divisionId: string
   seasonId: string
   division?: { id: string; name: string }
-  season?: { id: string; name: string }
+  season?: { id: string; name: string; minRosterSize?: number; maxRosterSize?: number }
   primaryColor: string
   secondaryColor: string
   approvalStatus: string
@@ -55,6 +55,10 @@ export default function SeasonDetailPage() {
   const [error, setError] = useState('')
   const [editingDivisionId, setEditingDivisionId] = useState<string | null>(null)
   const [expandedDivisions, setExpandedDivisions] = useState<Record<string, boolean>>({})
+  const [searchTerm, setSearchTerm] = useState('')
+  const [approvalFilter, setApprovalFilter] = useState<'ALL' | 'APPROVED' | 'PENDING'>('ALL')
+  const [rosterFilter, setRosterFilter] = useState<'ALL' | 'NEEDS_PLAYERS' | 'AT_MIN'>('ALL')
+  const [sortMode, setSortMode] = useState<'name' | 'approved' | 'pending'>('name')
   const [formData, setFormData] = useState({
     name: '',
     level: '1',
@@ -107,12 +111,57 @@ export default function SeasonDetailPage() {
   const divisionTeams = useMemo(() => {
     const grouped = new Map<string, Team[]>()
     for (const team of teams) {
+      const approvedRosterCount = team.players.filter((player) => player.status === 'APPROVED').length
+      const pendingRosterCount = team.players.filter((player) => player.status === 'PENDING').length
+      const matchesSearch =
+        searchTerm.trim().length === 0 ||
+        team.name.toLowerCase().includes(searchTerm.trim().toLowerCase())
+      const matchesApproval =
+        approvalFilter === 'ALL' ||
+        (approvalFilter === 'APPROVED' ? team.approvalStatus === 'APPROVED' : team.approvalStatus !== 'APPROVED')
+      const matchesRoster =
+        rosterFilter === 'ALL' ||
+        (rosterFilter === 'NEEDS_PLAYERS' ? approvedRosterCount < (team.season?.minRosterSize ?? 8) : approvedRosterCount >= (team.season?.minRosterSize ?? 8))
+
+      if (!matchesSearch || !matchesApproval || !matchesRoster) {
+        continue
+      }
+
       const existing = grouped.get(team.divisionId) || []
       existing.push(team)
       grouped.set(team.divisionId, existing)
     }
+
+    for (const [divisionId, divisionTeams] of grouped.entries()) {
+      divisionTeams.sort((a, b) => {
+        const aApproved = a.players.filter((player) => player.status === 'APPROVED').length
+        const bApproved = b.players.filter((player) => player.status === 'APPROVED').length
+        const aPending = a.players.filter((player) => player.status === 'PENDING').length
+        const bPending = b.players.filter((player) => player.status === 'PENDING').length
+
+        if (sortMode === 'approved') {
+          return bApproved - aApproved || a.name.localeCompare(b.name)
+        }
+        if (sortMode === 'pending') {
+          return bPending - aPending || a.name.localeCompare(b.name)
+        }
+        return a.name.localeCompare(b.name)
+      })
+      grouped.set(divisionId, divisionTeams)
+    }
+
     return grouped
-  }, [teams])
+  }, [approvalFilter, rosterFilter, searchTerm, sortMode, teams])
+
+  const visibleTeamCount = useMemo(
+    () => Array.from(divisionTeams.values()).reduce((total, divisionList) => total + divisionList.length, 0),
+    [divisionTeams],
+  )
+
+  const pendingVisibleTeams = useMemo(
+    () => Array.from(divisionTeams.values()).flat().filter((team) => team.approvalStatus !== 'APPROVED').map((team) => team.id),
+    [divisionTeams],
+  )
 
   const toggleDivision = (divisionId: string) => {
     setExpandedDivisions((current) => ({ ...current, [divisionId]: !current[divisionId] }))
@@ -199,6 +248,34 @@ export default function SeasonDetailPage() {
       await loadSeason()
     } catch (err: any) {
       setError(err.message || 'Failed to update team')
+    } finally {
+      setTeamActionLoading(null)
+    }
+  }
+
+  const bulkApproveVisibleTeams = async () => {
+    if (!pendingVisibleTeams.length) {
+      return
+    }
+
+    setTeamActionLoading('BULK-APPROVE')
+    setError('')
+    try {
+      const res = await fetch('/api/admin/teams', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          teamIds: pendingVisibleTeams,
+          action: 'APPROVE',
+        }),
+      })
+      const payload = await res.json()
+      if (!res.ok) {
+        throw new Error(payload.error || 'Failed to bulk approve teams')
+      }
+      await loadSeason()
+    } catch (err: any) {
+      setError(err.message || 'Failed to bulk approve teams')
     } finally {
       setTeamActionLoading(null)
     }
@@ -348,6 +425,56 @@ export default function SeasonDetailPage() {
               <h2 className="text-xl font-bold text-white">Divisions and Teams</h2>
               <p className="mt-1 text-sm text-white/45">Condensed season view with divisions as headers and teams as compact rows underneath.</p>
             </div>
+            <div className="text-right text-sm text-white/40">
+              <div>{visibleTeamCount} visible teams</div>
+              <div>{pendingVisibleTeams.length} pending approval</div>
+            </div>
+          </div>
+
+          <div className="mb-5 grid gap-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4 lg:grid-cols-[1.2fr,0.8fr,0.8fr,0.8fr,auto]">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30" />
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search teams"
+                className="w-full rounded-lg border border-white/10 bg-white/5 py-2.5 pl-10 pr-3 text-sm text-white"
+              />
+            </div>
+            <select
+              value={approvalFilter}
+              onChange={(e) => setApprovalFilter(e.target.value as typeof approvalFilter)}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white"
+            >
+              <option value="ALL">All approval</option>
+              <option value="APPROVED">Approved only</option>
+              <option value="PENDING">Pending only</option>
+            </select>
+            <select
+              value={rosterFilter}
+              onChange={(e) => setRosterFilter(e.target.value as typeof rosterFilter)}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white"
+            >
+              <option value="ALL">All roster states</option>
+              <option value="NEEDS_PLAYERS">Below min roster</option>
+              <option value="AT_MIN">At/above min roster</option>
+            </select>
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as typeof sortMode)}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white"
+            >
+              <option value="name">Sort by name</option>
+              <option value="approved">Sort by approved count</option>
+              <option value="pending">Sort by pending count</option>
+            </select>
+            <button
+              onClick={bulkApproveVisibleTeams}
+              disabled={!pendingVisibleTeams.length || teamActionLoading !== null}
+              className="rounded-lg bg-green-500/20 px-4 py-2.5 text-sm text-green-200 hover:bg-green-500/30 disabled:opacity-50"
+            >
+              {teamActionLoading === 'BULK-APPROVE' ? 'Approving...' : `Approve Visible (${pendingVisibleTeams.length})`}
+            </button>
           </div>
 
           {divisions.length === 0 ? (
@@ -374,10 +501,10 @@ export default function SeasonDetailPage() {
                           <h3 className="truncate text-base font-semibold text-white">{division.name}</h3>
                           <div className="mt-1 flex flex-wrap gap-4 text-xs text-white/40">
                             <span>Level {division.level}</span>
-                          <span>{stackedTeams.length} teams</span>
-                          <span>{division.playerCount} rostered players</span>
-                          <span>Roster target {division.minRosterSize}-{division.maxRosterSize}</span>
-                        </div>
+                            <span>{stackedTeams.length} teams</span>
+                            <span>{division.playerCount} rostered players</span>
+                            <span>Roster target {division.minRosterSize}-{division.maxRosterSize}</span>
+                          </div>
                         </div>
                       </button>
                       <div className="flex flex-wrap gap-2">
@@ -407,72 +534,80 @@ export default function SeasonDetailPage() {
 
                     {isExpanded && (
                       <div className="border-t border-white/10 bg-slate-950/25 px-3 py-3">
-                      {stackedTeams.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-white/10 bg-slate-950/30 p-4 text-sm text-white/40">
-                          No teams in this division yet.
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {stackedTeams.map((team) => {
-                          const approvedRosterCount = team.players.filter((player) => player.status === 'APPROVED').length
-                          const pendingRosterCount = team.players.filter((player) => player.status === 'PENDING').length
-                          return (
-                            <div key={team.id} className="rounded-xl border border-white/10 bg-slate-950/35 px-4 py-3" data-testid={`season-team-card-${team.id}`}>
-                              <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div className="flex min-w-0 items-center gap-3">
-                                  <div
-                                    className="flex h-10 w-10 items-center justify-center rounded-xl text-xs font-bold"
-                                    style={{ backgroundColor: team.primaryColor, color: team.secondaryColor }}
-                                  >
-                                    {team.name.slice(0, 2).toUpperCase()}
-                                  </div>
-                                  <div className="min-w-0">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <Link href={`/dashboard/teams/${team.id}`} className="truncate text-sm font-semibold text-white hover:text-cyan-200">
-                                        {team.name}
+                        {stackedTeams.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-white/10 bg-slate-950/30 p-4 text-sm text-white/40">
+                            No teams in this division yet.
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {stackedTeams.map((team) => {
+                              const approvedRosterCount = team.players.filter((player) => player.status === 'APPROVED').length
+                              const pendingRosterCount = team.players.filter((player) => player.status === 'PENDING').length
+                              const minRosterSize = team.season?.minRosterSize ?? 8
+                              const needsPlayers = approvedRosterCount < minRosterSize
+
+                              return (
+                                <div key={team.id} className="rounded-xl border border-white/10 bg-slate-950/35 px-4 py-3" data-testid={`season-team-card-${team.id}`}>
+                                  <div className="flex flex-wrap items-center justify-between gap-3">
+                                    <div className="flex min-w-0 items-center gap-3">
+                                      <div
+                                        className="flex h-10 w-10 items-center justify-center rounded-xl text-xs font-bold"
+                                        style={{ backgroundColor: team.primaryColor, color: team.secondaryColor }}
+                                      >
+                                        {team.name.slice(0, 2).toUpperCase()}
+                                      </div>
+                                      <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <Link href={`/dashboard/teams/${team.id}`} className="truncate text-sm font-semibold text-white hover:text-cyan-200">
+                                            {team.name}
+                                          </Link>
+                                          {team.approvalStatus === 'APPROVED' ? (
+                                            <span className="inline-flex items-center gap-1 rounded-full bg-green-500/15 px-2 py-1 text-xs text-green-300">
+                                              <CheckCircle2 className="h-3.5 w-3.5" />
+                                              Approved
+                                            </span>
+                                          ) : (
+                                            <span className="rounded-full bg-amber-500/15 px-2 py-1 text-xs text-amber-300">
+                                              {team.approvalStatus}
+                                            </span>
+                                          )}
+                                          {needsPlayers && (
+                                            <span className="rounded-full bg-red-500/15 px-2 py-1 text-xs text-red-300">
+                                              Below min roster
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-white/40">
+                                          <span>{approvedRosterCount} approved players</span>
+                                          <span>{pendingRosterCount} pending</span>
+                                          <span>{team.isConfirmed ? 'Confirmed' : 'Not confirmed'}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                      <Link
+                                        href={`/dashboard/teams/${team.id}`}
+                                        className="rounded-md bg-white/10 px-3 py-2 text-xs text-white/80 hover:bg-white/15"
+                                      >
+                                        Open Team
                                       </Link>
-                                      {team.approvalStatus === 'APPROVED' ? (
-                                        <span className="inline-flex items-center gap-1 rounded-full bg-green-500/15 px-2 py-1 text-xs text-green-300">
-                                          <CheckCircle2 className="h-3.5 w-3.5" />
-                                          Approved
-                                        </span>
-                                      ) : (
-                                        <span className="rounded-full bg-amber-500/15 px-2 py-1 text-xs text-amber-300">
-                                          {team.approvalStatus}
-                                        </span>
+                                      {team.approvalStatus !== 'APPROVED' && (
+                                        <button
+                                          onClick={() => updateTeamApproval(team.id, 'APPROVE')}
+                                          disabled={teamActionLoading !== null}
+                                          className="rounded-md bg-green-500/20 px-3 py-2 text-xs text-green-200 hover:bg-green-500/30 disabled:opacity-50"
+                                          data-testid={`approve-team-${team.id}`}
+                                        >
+                                          {teamActionLoading === `APPROVE-${team.id}` ? 'Approving...' : 'Approve Team'}
+                                        </button>
                                       )}
                                     </div>
-                                    <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-white/40">
-                                      <span>{approvedRosterCount} approved players</span>
-                                      <span>{pendingRosterCount} pending</span>
-                                      <span>{team.isConfirmed ? 'Confirmed' : 'Not confirmed'}</span>
-                                    </div>
                                   </div>
                                 </div>
-                                <div className="flex flex-wrap gap-2">
-                                  <Link
-                                    href={`/dashboard/teams/${team.id}`}
-                                    className="rounded-md bg-white/10 px-3 py-2 text-xs text-white/80 hover:bg-white/15"
-                                  >
-                                    Open Team
-                                  </Link>
-                                  {team.approvalStatus !== 'APPROVED' && (
-                                    <button
-                                      onClick={() => updateTeamApproval(team.id, 'APPROVE')}
-                                      disabled={teamActionLoading !== null}
-                                      className="rounded-md bg-green-500/20 px-3 py-2 text-xs text-green-200 hover:bg-green-500/30 disabled:opacity-50"
-                                      data-testid={`approve-team-${team.id}`}
-                                    >
-                                      {teamActionLoading === `APPROVE-${team.id}` ? 'Approving...' : 'Approve Team'}
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          )
-                          })}
-                        </div>
-                      )}
+                              )
+                            })}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
