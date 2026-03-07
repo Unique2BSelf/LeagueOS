@@ -24,6 +24,7 @@ export default function InsuranceStatusPage() {
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [insurance, setInsurance] = useState<InsuranceResponse | null>(null)
+  const [returnedFromCheckout, setReturnedFromCheckout] = useState(false)
 
   const fetchInsurance = async () => {
     const response = await fetch('/api/insurance', { cache: 'no-store' })
@@ -32,6 +33,7 @@ export default function InsuranceStatusPage() {
     }
     const data = await response.json()
     setInsurance(data)
+    return data as InsuranceResponse
   }
 
   useEffect(() => {
@@ -53,31 +55,68 @@ export default function InsuranceStatusPage() {
       return
     }
 
+    setReturnedFromCheckout(true)
     setSaving(true)
     setError(null)
     setMessage(null)
 
-    fetch('/api/payments/checkout/complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ sessionId }),
-    })
-      .then(async (response) => {
+    const finalizeReturnedCheckout = async () => {
+      try {
+        const currentInsurance = await fetchInsurance()
+        if (currentInsurance.hasActiveInsurance) {
+          setMessage('Annual insurance is now active. You can register for seasons.')
+          return
+        }
+
+        const response = await fetch('/api/payments/checkout/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ sessionId }),
+        })
         const data = await response.json()
+
         if (!response.ok) {
           throw new Error(data.error || 'Failed to finalize insurance payment')
         }
-        setMessage('Annual insurance is now active. You can register for seasons.')
-        return fetchInsurance()
-      })
-      .catch((finalizeError) => setError(finalizeError instanceof Error ? finalizeError.message : 'Failed to finalize insurance payment'))
-      .finally(() => {
+
+        const refreshedInsurance = await fetchInsurance()
+        if (refreshedInsurance.hasActiveInsurance) {
+          setMessage('Annual insurance is now active. You can register for seasons.')
+          return
+        }
+
+        throw new Error('Insurance payment completed, but coverage is not active yet')
+      } catch (finalizeError) {
+        try {
+          const currentInsurance = await fetchInsurance()
+          if (currentInsurance.hasActiveInsurance) {
+            setMessage('Annual insurance is now active. You can register for seasons.')
+            return
+          }
+        } catch {
+          // Preserve the original completion error below.
+        }
+
+        setError(finalizeError instanceof Error ? finalizeError.message : 'Failed to finalize insurance payment')
+      } finally {
         setSaving(false)
         const cleanUrl = `${window.location.pathname}`
         window.history.replaceState({}, '', cleanUrl)
-      })
+      }
+    }
+
+    void finalizeReturnedCheckout()
   }, [])
+
+  useEffect(() => {
+    if (!returnedFromCheckout || !insurance?.hasActiveInsurance) {
+      return
+    }
+
+    setError(null)
+    setMessage('Annual insurance is now active. You can register for seasons.')
+  }, [returnedFromCheckout, insurance])
 
   const handlePurchaseInsurance = async () => {
     setSaving(true)
