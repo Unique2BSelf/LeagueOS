@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useSessionUser } from '@/hooks/use-session-user'
-import { AlertCircle, Loader2, Palette, Plus, Users } from 'lucide-react'
+import { AlertCircle, ImagePlus, Loader2, Palette, Plus, Users } from 'lucide-react'
 
 type SeasonOption = {
   id: string
@@ -56,6 +56,7 @@ function CreateTeamPageContent() {
     secondaryColor: '#FFFFFF',
     escrowTarget: '2000',
   })
+  const [jerseyFile, setJerseyFile] = useState<File | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -165,6 +166,19 @@ function CreateTeamPageContent() {
       const payload = await res.json()
       if (!res.ok) {
         throw new Error(payload.error || 'Failed to create team')
+      }
+
+      if (jerseyFile) {
+        const jerseyFormData = new FormData()
+        jerseyFormData.append('file', jerseyFile)
+        const jerseyRes = await fetch(`/api/teams/${payload.id}/jersey`, {
+          method: 'POST',
+          body: jerseyFormData,
+        })
+        if (!jerseyRes.ok) {
+          const jerseyPayload = await jerseyRes.json()
+          throw new Error(jerseyPayload.error || 'Team created, but jersey upload failed')
+        }
       }
 
       router.push(`/dashboard/teams/${payload.id}`)
@@ -353,6 +367,21 @@ function CreateTeamPageContent() {
                   )}
                 </div>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-white/70 mb-2">
+                <ImagePlus className="inline w-4 h-4 mr-1" />
+                Jersey Image
+              </label>
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                onChange={(e) => setJerseyFile(e.target.files?.[0] || null)}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white"
+                data-testid="team-jersey-input"
+              />
+              <p className="text-white/40 text-xs mt-1">Optional. Upload a jersey image so players and refs can identify the team quickly.</p>
             </div>
 
             <div>

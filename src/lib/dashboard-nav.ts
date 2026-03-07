@@ -11,6 +11,7 @@ import {
   History,
   Home,
   Lock,
+  MapPin,
   Megaphone,
   Shield,
   Ticket,
@@ -78,6 +79,7 @@ export const dashboardNavGroups: DashboardNavGroup[] = [
     description: 'Season setup, scheduling, and registration controls',
     items: [
       { href: '/dashboard/seasons', label: 'Seasons & Divisions', icon: Calendar, description: 'Manage seasons, forms, and division structure', roles: ['ADMIN'] },
+      { href: '/dashboard/locations', label: 'Fields & Locations', icon: MapPin, description: 'Facilities, fields, and map links for scheduling', roles: ['ADMIN'] },
       { href: '/dashboard/schedule-generator', label: 'Schedule Generator', icon: Calendar, description: 'Generate and persist season schedules', roles: ['ADMIN'] },
       { href: '/dashboard/registrations/approve', label: 'Approve Players', icon: ClipboardCheck, description: 'Registration approval queue', roles: ['ADMIN'] },
       { href: '/dashboard/discounts', label: 'Discount Codes', icon: Ticket, description: 'Registration discounts', roles: ['ADMIN'] },

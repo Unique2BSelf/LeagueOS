@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Check, Copy, Loader2, RefreshCw, Search, Shield, UserPlus, Users, X } from 'lucide-react'
+import { ArrowLeft, Check, Copy, ImagePlus, Loader2, RefreshCw, Search, Shield, Trash2, UserPlus, Users, X } from 'lucide-react'
 import { useSessionUser } from '@/hooks/use-session-user'
 
 interface Team {
@@ -21,6 +21,7 @@ interface Team {
   approvalStatus?: string
   rosterStatus?: 'DRAFT' | 'SUBMITTED' | 'FINALIZED'
   isArchived?: boolean
+  jerseyPhotoUrl?: string | null
   inviteCode?: string | null
   inviteCodeExpiry?: Date | null
 }
@@ -63,6 +64,7 @@ export default function TeamDashboardPage() {
   const [rosterActionLoading, setRosterActionLoading] = useState<string | null>(null)
   const [rosterStatusLoading, setRosterStatusLoading] = useState<string | null>(null)
   const [archiveLoading, setArchiveLoading] = useState(false)
+  const [jerseyLoading, setJerseyLoading] = useState(false)
   const [isCaptain, setIsCaptain] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState<SearchUser[]>([])
@@ -344,6 +346,49 @@ export default function TeamDashboardPage() {
     }
   }
 
+  const uploadJersey = async (file: File | null) => {
+    if (!file || !team) return
+    setJerseyLoading(true)
+    setError('')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch(`/api/teams/${team.id}/jersey`, {
+        method: 'POST',
+        body: formData,
+      })
+      const payload = await res.json()
+      if (!res.ok) {
+        throw new Error(payload.error || 'Failed to upload jersey image')
+      }
+      await fetchTeamData(team.id, user!.id)
+    } catch (err: any) {
+      setError(err.message || 'Failed to upload jersey image')
+    } finally {
+      setJerseyLoading(false)
+    }
+  }
+
+  const removeJersey = async () => {
+    if (!team) return
+    setJerseyLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/teams/${team.id}/jersey`, {
+        method: 'DELETE',
+      })
+      const payload = await res.json()
+      if (!res.ok) {
+        throw new Error(payload.error || 'Failed to remove jersey image')
+      }
+      await fetchTeamData(team.id, user!.id)
+    } catch (err: any) {
+      setError(err.message || 'Failed to remove jersey image')
+    } finally {
+      setJerseyLoading(false)
+    }
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div className="mb-2">
@@ -594,6 +639,57 @@ export default function TeamDashboardPage() {
         </div>
 
         <div className="space-y-6">
+          <div className="glass-card p-6">
+            <div className="mb-4 flex items-center gap-2">
+              <ImagePlus className="h-5 w-5 text-cyan-400" />
+              <h2 className="text-xl font-bold text-white">Jersey</h2>
+            </div>
+            {team?.jerseyPhotoUrl ? (
+              <div className="space-y-4">
+                <img
+                  src={team.jerseyPhotoUrl}
+                  alt={`${team.name} jersey`}
+                  className="h-48 w-full rounded-xl object-cover border border-white/10 bg-black/20"
+                />
+                {(isCaptain || user?.role === 'ADMIN') && (
+                  <div className="flex flex-wrap gap-2">
+                    <label className="rounded-md bg-cyan-500/20 px-3 py-2 text-xs text-cyan-200 hover:bg-cyan-500/30 cursor-pointer">
+                      {jerseyLoading ? 'Uploading...' : 'Replace Jersey'}
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        className="hidden"
+                        onChange={(e) => void uploadJersey(e.target.files?.[0] || null)}
+                      />
+                    </label>
+                    <button
+                      onClick={removeJersey}
+                      disabled={jerseyLoading}
+                      className="rounded-md bg-red-500/20 px-3 py-2 text-xs text-red-300 hover:bg-red-500/30 disabled:opacity-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-white/10 p-4 text-sm text-white/45">
+                <p>No jersey image uploaded yet.</p>
+                {(isCaptain || user?.role === 'ADMIN') && (
+                  <label className="mt-3 inline-block rounded-md bg-cyan-500/20 px-3 py-2 text-xs text-cyan-200 hover:bg-cyan-500/30 cursor-pointer">
+                    {jerseyLoading ? 'Uploading...' : 'Upload Jersey Image'}
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="hidden"
+                      onChange={(e) => void uploadJersey(e.target.files?.[0] || null)}
+                    />
+                  </label>
+                )}
+              </div>
+            )}
+          </div>
+
           {(isCaptain || user?.role === 'ADMIN') && (
             <div className="glass-card p-6">
               <div className="mb-4 flex items-center gap-2">

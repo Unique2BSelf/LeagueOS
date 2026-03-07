@@ -78,6 +78,8 @@ enum AuditActionType {
 enum AuditEntityType {
   SEASON
   DIVISION
+  LOCATION
+  FIELD
   TEAM
   REGISTRATION
   INSURANCE_POLICY
