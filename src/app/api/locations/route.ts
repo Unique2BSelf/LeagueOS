@@ -33,6 +33,12 @@ export async function POST(request: NextRequest) {
     const address = typeof body?.address === 'string' ? body.address.trim() : '';
     const latitude = body?.latitude === '' || body?.latitude === null || body?.latitude === undefined ? null : Number(body.latitude);
     const longitude = body?.longitude === '' || body?.longitude === null || body?.longitude === undefined ? null : Number(body.longitude);
+    const notes = typeof body?.notes === 'string' ? body.notes.trim() : '';
+    const parkingInfo = typeof body?.parkingInfo === 'string' ? body.parkingInfo.trim() : '';
+    const restroomInfo = typeof body?.restroomInfo === 'string' ? body.restroomInfo.trim() : '';
+    const contactName = typeof body?.contactName === 'string' ? body.contactName.trim() : '';
+    const contactEmail = typeof body?.contactEmail === 'string' ? body.contactEmail.trim() : '';
+    const contactPhone = typeof body?.contactPhone === 'string' ? body.contactPhone.trim() : '';
 
     if (!name || !address) {
       return NextResponse.json({ error: 'name and address are required' }, { status: 400 });
@@ -44,6 +50,12 @@ export async function POST(request: NextRequest) {
         address,
         latitude: Number.isFinite(latitude) ? latitude : null,
         longitude: Number.isFinite(longitude) ? longitude : null,
+        notes: notes || null,
+        parkingInfo: parkingInfo || null,
+        restroomInfo: restroomInfo || null,
+        contactName: contactName || null,
+        contactEmail: contactEmail || null,
+        contactPhone: contactPhone || null,
       },
       include: {
         fields: true,
@@ -60,6 +72,12 @@ export async function POST(request: NextRequest) {
         address: created.address,
         latitude: created.latitude,
         longitude: created.longitude,
+        notes: created.notes,
+        parkingInfo: created.parkingInfo,
+        restroomInfo: created.restroomInfo,
+        contactName: created.contactName,
+        contactEmail: created.contactEmail,
+        contactPhone: created.contactPhone,
       },
     });
 
@@ -92,6 +110,12 @@ export async function PATCH(request: NextRequest) {
     const nextAddress = typeof body?.address === 'string' ? body.address.trim() : existing.address;
     const nextLatitude = body?.latitude === '' ? null : body?.latitude === undefined ? existing.latitude : Number(body.latitude);
     const nextLongitude = body?.longitude === '' ? null : body?.longitude === undefined ? existing.longitude : Number(body.longitude);
+    const nextNotes = typeof body?.notes === 'string' ? body.notes.trim() : existing.notes;
+    const nextParkingInfo = typeof body?.parkingInfo === 'string' ? body.parkingInfo.trim() : existing.parkingInfo;
+    const nextRestroomInfo = typeof body?.restroomInfo === 'string' ? body.restroomInfo.trim() : existing.restroomInfo;
+    const nextContactName = typeof body?.contactName === 'string' ? body.contactName.trim() : existing.contactName;
+    const nextContactEmail = typeof body?.contactEmail === 'string' ? body.contactEmail.trim() : existing.contactEmail;
+    const nextContactPhone = typeof body?.contactPhone === 'string' ? body.contactPhone.trim() : existing.contactPhone;
 
     const updated = await prisma.location.update({
       where: { id },
@@ -100,6 +124,12 @@ export async function PATCH(request: NextRequest) {
         address: nextAddress,
         latitude: Number.isFinite(nextLatitude) ? nextLatitude : null,
         longitude: Number.isFinite(nextLongitude) ? nextLongitude : null,
+        notes: nextNotes || null,
+        parkingInfo: nextParkingInfo || null,
+        restroomInfo: nextRestroomInfo || null,
+        contactName: nextContactName || null,
+        contactEmail: nextContactEmail || null,
+        contactPhone: nextContactPhone || null,
       },
       include: {
         fields: true,
@@ -116,12 +146,24 @@ export async function PATCH(request: NextRequest) {
         address: existing.address,
         latitude: existing.latitude,
         longitude: existing.longitude,
+        notes: existing.notes,
+        parkingInfo: existing.parkingInfo,
+        restroomInfo: existing.restroomInfo,
+        contactName: existing.contactName,
+        contactEmail: existing.contactEmail,
+        contactPhone: existing.contactPhone,
       },
       after: {
         name: updated.name,
         address: updated.address,
         latitude: updated.latitude,
         longitude: updated.longitude,
+        notes: updated.notes,
+        parkingInfo: updated.parkingInfo,
+        restroomInfo: updated.restroomInfo,
+        contactName: updated.contactName,
+        contactEmail: updated.contactEmail,
+        contactPhone: updated.contactPhone,
       },
     });
 
@@ -170,6 +212,12 @@ export async function DELETE(request: NextRequest) {
         address: existing.address,
         latitude: existing.latitude,
         longitude: existing.longitude,
+        notes: existing.notes,
+        parkingInfo: existing.parkingInfo,
+        restroomInfo: existing.restroomInfo,
+        contactName: existing.contactName,
+        contactEmail: existing.contactEmail,
+        contactPhone: existing.contactPhone,
       },
     });
 

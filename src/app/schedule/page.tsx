@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Calendar, MapPin } from 'lucide-react'
+import { Calendar, ExternalLink, MapPin } from 'lucide-react'
 import { getScheduleMatches, getSchedulerSeasons } from '@/lib/schedule'
 
 export const metadata = {
@@ -135,7 +135,28 @@ export default async function SchedulePage({
                         <MapPin className="w-3 h-3" />
                         {match.locationName}
                       </div>
+                      {match.locationAddress ? (
+                        <div className="mt-1 max-w-xs text-xs text-white/45">{match.locationAddress}</div>
+                      ) : null}
+                      {match.mapLink ? (
+                        <a
+                          href={match.mapLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-2 inline-flex items-center gap-1 text-xs text-cyan-300 hover:text-cyan-200"
+                        >
+                          Directions
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      ) : null}
                     </div>
+                    {(match.locationNotes || match.parkingInfo || match.restroomInfo) ? (
+                      <div className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/65">
+                        {match.locationNotes ? <div>{match.locationNotes}</div> : null}
+                        {match.parkingInfo ? <div className="mt-1"><span className="text-white/35">Parking:</span> {match.parkingInfo}</div> : null}
+                        {match.restroomInfo ? <div className="mt-1"><span className="text-white/35">Restrooms:</span> {match.restroomInfo}</div> : null}
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>

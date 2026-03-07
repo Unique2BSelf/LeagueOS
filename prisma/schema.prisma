@@ -331,7 +331,13 @@ model Location {
   address       String
   latitude      Float?
   longitude     Float?
-
+  notes         String?
+  parkingInfo   String?
+  restroomInfo  String?
+  contactName   String?
+  contactEmail  String?
+  contactPhone  String?
+  
   fields        Field[]
 }
 
@@ -341,6 +347,8 @@ model Field {
   name          String
   qualityScore  Int
   hasLights     Boolean
+  surfaceType   String?
+  notes         String?
 
   location      Location            @relation(fields: [locationId], references: [id])
   maintenance   MaintenanceLog[]

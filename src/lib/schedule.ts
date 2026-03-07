@@ -17,6 +17,11 @@ export type ScheduleMatchView = {
   fieldId: string;
   fieldName: string;
   locationName: string;
+  locationAddress: string | null;
+  locationNotes: string | null;
+  parkingInfo: string | null;
+  restroomInfo: string | null;
+  mapLink: string | null;
   timeSlot: string;
   date: string;
   scheduledAt: string;
@@ -182,6 +187,12 @@ export async function getScheduleMatches(seasonId?: string | null): Promise<Sche
 
   return matches.map((match) => {
     const field = fieldsById.get(match.fieldId);
+    const location = field?.location;
+    const mapLink = location
+      ? location.latitude !== null && location.longitude !== null
+        ? `https://www.google.com/maps?q=${location.latitude},${location.longitude}`
+        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location.address)}`
+      : null;
 
     return {
       matchId: match.id,
@@ -193,7 +204,12 @@ export async function getScheduleMatches(seasonId?: string | null): Promise<Sche
       awayTeamName: match.awayTeam.name,
       fieldId: match.fieldId,
       fieldName: field?.name ?? 'Unknown Field',
-      locationName: field?.location?.name ?? 'Unknown Location',
+      locationName: location?.name ?? 'Unknown Location',
+      locationAddress: location?.address ?? null,
+      locationNotes: location?.notes ?? null,
+      parkingInfo: location?.parkingInfo ?? null,
+      restroomInfo: location?.restroomInfo ?? null,
+      mapLink,
       timeSlot: toTimeSlot(match.scheduledAt),
       date: toIsoDate(match.scheduledAt),
       scheduledAt: match.scheduledAt.toISOString(),

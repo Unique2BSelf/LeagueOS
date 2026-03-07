@@ -35,6 +35,8 @@ export async function POST(request: NextRequest) {
     const name = typeof body?.name === 'string' ? body.name.trim() : '';
     const qualityScore = Number(body?.qualityScore);
     const hasLights = Boolean(body?.hasLights);
+    const surfaceType = typeof body?.surfaceType === 'string' ? body.surfaceType.trim() : '';
+    const notes = typeof body?.notes === 'string' ? body.notes.trim() : '';
 
     if (!locationId || !name || !Number.isInteger(qualityScore)) {
       return NextResponse.json({ error: 'locationId, name, and integer qualityScore are required' }, { status: 400 });
@@ -51,6 +53,8 @@ export async function POST(request: NextRequest) {
         name,
         qualityScore,
         hasLights,
+        surfaceType: surfaceType || null,
+        notes: notes || null,
       },
       include: {
         location: true,
@@ -68,6 +72,8 @@ export async function POST(request: NextRequest) {
         name: created.name,
         qualityScore: created.qualityScore,
         hasLights: created.hasLights,
+        surfaceType: created.surfaceType,
+        notes: created.notes,
       },
     });
 
@@ -102,6 +108,8 @@ export async function PATCH(request: NextRequest) {
     const nextName = typeof body?.name === 'string' ? body.name.trim() : existing.name;
     const nextQualityScore = body?.qualityScore === undefined ? existing.qualityScore : Number(body.qualityScore);
     const nextHasLights = body?.hasLights === undefined ? existing.hasLights : Boolean(body.hasLights);
+    const nextSurfaceType = typeof body?.surfaceType === 'string' ? body.surfaceType.trim() : existing.surfaceType;
+    const nextNotes = typeof body?.notes === 'string' ? body.notes.trim() : existing.notes;
 
     const updated = await prisma.field.update({
       where: { id },
@@ -109,6 +117,8 @@ export async function PATCH(request: NextRequest) {
         name: nextName,
         qualityScore: Number.isInteger(nextQualityScore) ? nextQualityScore : existing.qualityScore,
         hasLights: nextHasLights,
+        surfaceType: nextSurfaceType || null,
+        notes: nextNotes || null,
       },
       include: { location: true },
     });
@@ -124,6 +134,8 @@ export async function PATCH(request: NextRequest) {
         name: existing.name,
         qualityScore: existing.qualityScore,
         hasLights: existing.hasLights,
+        surfaceType: existing.surfaceType,
+        notes: existing.notes,
       },
       after: {
         locationId: updated.locationId,
@@ -131,6 +143,8 @@ export async function PATCH(request: NextRequest) {
         name: updated.name,
         qualityScore: updated.qualityScore,
         hasLights: updated.hasLights,
+        surfaceType: updated.surfaceType,
+        notes: updated.notes,
       },
     });
 
@@ -180,6 +194,8 @@ export async function DELETE(request: NextRequest) {
         name: existing.name,
         qualityScore: existing.qualityScore,
         hasLights: existing.hasLights,
+        surfaceType: existing.surfaceType,
+        notes: existing.notes,
       },
     });
 
