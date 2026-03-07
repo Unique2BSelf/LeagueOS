@@ -39,9 +39,13 @@ export default function TeamsPage() {
       <main className="max-w-7xl mx-auto px-4 py-8">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold text-white">Teams</h1>
-          <button className="px-4 py-2 bg-cyan-500 text-black rounded-lg font-medium">
+          <Link
+            href="/dashboard/teams/create"
+            className="px-4 py-2 bg-cyan-500 text-black rounded-lg font-medium"
+            data-testid="teams-page-create-link"
+          >
             + Create Team
-          </button>
+          </Link>
         </div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -74,9 +78,13 @@ export default function TeamsPage() {
               </div>
 
               <div className="mt-4 pt-4 border-t border-white/10">
-                <button className="w-full py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors">
+                <Link
+                  href={`/dashboard/teams/${team.id}`}
+                  className="block w-full py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors text-center"
+                  data-testid={`teams-page-roster-link-${team.id}`}
+                >
                   View Roster
-                </button>
+                </Link>
               </div>
             </div>
           ))}

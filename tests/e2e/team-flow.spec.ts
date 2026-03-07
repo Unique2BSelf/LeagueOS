@@ -32,6 +32,37 @@ async function bootstrapSession(page: import('@playwright/test').Page, options: 
 }
 
 test.describe('MVP team flow', () => {
+  test('teams index routes create team and view roster actions to real pages', async ({ browser, baseURL }) => {
+    const adminContext = await browser.newContext({ baseURL });
+    const adminPage = await adminContext.newPage();
+    const adminEmail = uniqueEmail('pw-team-index-admin');
+
+    await bootstrapSession(adminPage, {
+      email: adminEmail,
+      fullName: 'Playwright Team Index Admin',
+      role: 'ADMIN',
+    });
+
+    await adminPage.goto('/dashboard/teams/create');
+    const teamName = `Index FC ${Date.now()}`;
+    await adminPage.getByPlaceholder('Enter team name').fill(teamName);
+    await adminPage.getByRole('button', { name: 'Create Team' }).click();
+    await adminPage.waitForURL((url) => /\/dashboard\/teams\/(?!create$)[^/]+$/.test(url.pathname));
+    const teamId = adminPage.url().split('/').pop();
+    expect(teamId).toBeTruthy();
+
+    await adminPage.goto('/teams');
+    await adminPage.getByTestId('teams-page-create-link').click();
+    await adminPage.waitForURL('**/dashboard/teams/create');
+
+    await adminPage.goto('/teams');
+    await adminPage.getByTestId(`teams-page-roster-link-${teamId}`).click();
+    await adminPage.waitForURL(`**/dashboard/teams/${teamId}`);
+    await expect(adminPage.getByRole('heading', { name: teamName })).toBeVisible();
+
+    await adminContext.close();
+  });
+
   test('captain/admin can approve and remove roster entries after a player requests to join', async ({ browser, baseURL }) => {
     const adminContext = await browser.newContext({ baseURL });
     const adminPage = await adminContext.newPage();
