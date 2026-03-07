@@ -5,6 +5,13 @@ const prismaMock = {
   user: {
     findUnique: vi.fn(),
   },
+  match: {
+    findUnique: vi.fn(),
+    update: vi.fn(),
+  },
+  matchEvent: {
+    create: vi.fn(),
+  },
   disciplinaryAction: {
     create: vi.fn(),
   },
@@ -26,9 +33,70 @@ describe('Match center API', () => {
       role: 'REF',
       expiresAt: Date.now() + 60_000,
     });
+    prismaMock.match.findUnique.mockResolvedValueOnce({
+      id: 'match-1',
+      status: 'LIVE',
+      homeTeamId: 'team-1',
+      awayTeamId: 'team-2',
+      homeScore: 0,
+      awayScore: 0,
+      currentMinute: 10,
+      checklistDone: true,
+      fieldInspected: true,
+      playerCardsChecked: true,
+      teamsPresent: true,
+      refereeConfirmed: true,
+      startedAt: null,
+      endedAt: null,
+      weatherStatus: null,
+      reportNotes: null,
+      homeTeam: { name: 'Home FC' },
+      awayTeam: { name: 'Away FC' },
+      events: [],
+    });
     prismaMock.user.findUnique.mockResolvedValueOnce({
       id: 'ref-1',
       role: 'REF',
+    });
+    prismaMock.matchEvent.create.mockResolvedValueOnce({
+      id: 'event-1',
+      type: 'RED_CARD',
+      minute: 10,
+      teamId: 'team-1',
+      playerId: 'player-1',
+      playerName: null,
+      description: 'Studs up challenge',
+      createdAt: new Date('2026-03-07T00:00:00.000Z'),
+    });
+    prismaMock.match.update.mockResolvedValueOnce({
+      id: 'match-1',
+      status: 'LIVE',
+      homeTeamId: 'team-1',
+      awayTeamId: 'team-2',
+      homeScore: 0,
+      awayScore: 0,
+      currentMinute: 10,
+      checklistDone: true,
+      fieldInspected: true,
+      playerCardsChecked: true,
+      teamsPresent: true,
+      refereeConfirmed: true,
+      startedAt: null,
+      endedAt: null,
+      weatherStatus: null,
+      reportNotes: null,
+      homeTeam: { name: 'Home FC' },
+      awayTeam: { name: 'Away FC' },
+      events: [{
+        id: 'event-1',
+        type: 'RED_CARD',
+        minute: 10,
+        teamId: 'team-1',
+        playerId: 'player-1',
+        playerName: null,
+        description: 'Studs up challenge',
+        createdAt: new Date('2026-03-07T00:00:00.000Z'),
+      }],
     });
     prismaMock.disciplinaryAction.create.mockResolvedValueOnce({ id: 'discipline-1' });
 
@@ -51,6 +119,14 @@ describe('Match center API', () => {
 
     expect(response.status).toBe(200);
     expect(payload.events).toHaveLength(1);
+    expect(prismaMock.matchEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        matchId: 'match-1',
+        type: 'RED_CARD',
+        teamId: 'team-1',
+        playerId: 'player-1',
+      }),
+    });
     expect(prismaMock.disciplinaryAction.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         userId: 'player-1',

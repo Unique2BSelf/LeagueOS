@@ -1,194 +1,232 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { getSessionFromRequest } from '@/lib/auth';
 
-/**
- * Volunteer Shifts API per PRD:
- * - GET /api/volunteers/shifts → List shifts for user/event
- * - POST /api/volunteers/shifts → Sign up for shift
- * - Track hours for recognition/tax purposes
- */
+async function getActor(request: NextRequest) {
+  const session = await getSessionFromRequest(request);
+  if (!session) {
+    return null;
+  }
 
-interface VolunteerShift {
-  id: string;
-  userId?: string;
-  userName?: string;
-  eventId: string;
-  eventName: string;
-  role: 'ID_CHECKER' | 'SETUP' | 'TEAR_DOWN' | 'SCOREKEEPER' | 'CONCESSIONS' | 'FIELD_MONITOR';
-  date: string;
-  startTime: string;
-  endTime: string;
-  hours: number;
-  status: 'OPEN' | 'ASSIGNED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED';
-  createdAt: string;
+  return prisma.user.findUnique({
+    where: { id: session.userId },
+    select: {
+      id: true,
+      fullName: true,
+      role: true,
+      isActive: true,
+    },
+  });
 }
 
-// In-memory storage
-const shifts: Map<string, VolunteerShift> = new Map();
+function canManage(role: string) {
+  return role === 'ADMIN' || role === 'MODERATOR';
+}
 
-// Seed some sample shifts
-const sampleShifts: VolunteerShift[] = [
-  { id: 'vs-1', eventId: 'match-1', eventName: 'FC United vs City Kickers', role: 'ID_CHECKER', date: '2026-03-08', startTime: '09:00', endTime: '11:00', hours: 2, status: 'ASSIGNED', createdAt: new Date().toISOString() },
-  { id: 'vs-2', eventId: 'match-1', eventName: 'FC United vs City Kickers', role: 'SETUP', date: '2026-03-08', startTime: '08:00', endTime: '10:00', hours: 2, status: 'OPEN', createdAt: new Date().toISOString() },
-  { id: 'vs-3', eventId: 'match-2', eventName: 'Riverside FC vs Thunder FC', role: 'SCOREKEEPER', date: '2026-03-15', startTime: '11:00', endTime: '13:00', hours: 2, status: 'OPEN', createdAt: new Date().toISOString() },
-  { id: 'vs-4', eventId: 'event-1', eventName: 'Spring Tournament', role: 'CONCESSIONS', date: '2026-03-22', startTime: '08:00', endTime: '16:00', hours: 8, status: 'OPEN', createdAt: new Date().toISOString() },
-];
-
-sampleShifts.forEach(s => shifts.set(s.id, s));
+async function serializeShift(shift: any) {
+  return {
+    id: shift.id,
+    userId: shift.userId,
+    userName: shift.user?.fullName || null,
+    eventId: shift.eventId,
+    eventName: shift.eventName || 'Volunteer Event',
+    role: shift.role,
+    date: shift.date?.toISOString().slice(0, 10) || null,
+    startTime: shift.startTime,
+    endTime: shift.endTime,
+    hours: shift.hours ?? 0,
+    status: shift.status,
+    notes: shift.notes,
+    createdAt: shift.createdAt.toISOString(),
+  };
+}
 
 export async function GET(request: NextRequest) {
+  const actor = await getActor(request);
+  if (!actor || !actor.isActive) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
   const userId = searchParams.get('userId');
   const eventId = searchParams.get('eventId');
   const status = searchParams.get('status');
-  
-  let result = Array.from(shifts.values());
-  
-  if (userId) {
-    result = result.filter(s => s.userId === userId);
+
+  if (userId && userId !== actor.id && !canManage(actor.role)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
-  
-  if (eventId) {
-    result = result.filter(s => s.eventId === eventId);
-  }
-  
-  if (status) {
-    result = result.filter(s => s.status === status);
-  }
-  
-  // Group by status for dashboard
+
+  const shifts = await prisma.volunteerShift.findMany({
+    where: {
+      ...(userId ? { userId } : {}),
+      ...(eventId ? { eventId } : {}),
+      ...(status ? { status } : {}),
+    },
+    include: {
+      user: {
+        select: {
+          fullName: true,
+        },
+      },
+    },
+    orderBy: [
+      { date: 'asc' },
+      { createdAt: 'desc' },
+    ],
+  });
+
+  const serialized = await Promise.all(shifts.map(serializeShift));
   const grouped = {
-    open: result.filter(s => s.status === 'OPEN'),
-    assigned: result.filter(s => s.status === 'ASSIGNED'),
-    confirmed: result.filter(s => s.status === 'CONFIRMED'),
-    completed: result.filter(s => s.status === 'COMPLETED'),
+    open: serialized.filter((shift) => shift.status === 'OPEN'),
+    assigned: serialized.filter((shift) => shift.status === 'ASSIGNED'),
+    confirmed: serialized.filter((shift) => shift.status === 'CONFIRMED'),
+    completed: serialized.filter((shift) => shift.status === 'COMPLETED'),
   };
-  
-  // Calculate total hours
-  const totalHours = result
-    .filter(s => s.status === 'COMPLETED')
-    .reduce((sum, s) => sum + s.hours, 0);
-  
+
+  const totalHours = serialized
+    .filter((shift) => shift.status === 'COMPLETED')
+    .reduce((sum, shift) => sum + (shift.hours || 0), 0);
+
   return NextResponse.json({
-    shifts: result,
+    shifts: serialized,
     grouped,
     totalHours,
-    count: result.length,
+    count: serialized.length,
   });
 }
 
 export async function POST(request: NextRequest) {
+  const actor = await getActor(request);
+  if (!actor || !actor.isActive) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
     const body = await request.json();
-    const { userId, userName, eventId, eventName, role, date, startTime, endTime, action } = body;
-    
+    const action = typeof body.action === 'string' ? body.action : '';
+
     if (action === 'signup') {
-      if (!userId || !eventId || !role || !date) {
-        return NextResponse.json(
-          { error: 'userId, eventId, role, and date required' },
-          { status: 400 }
-        );
+      const shiftId = typeof body.shiftId === 'string' ? body.shiftId : '';
+
+      if (shiftId) {
+        const existing = await prisma.volunteerShift.findUnique({ where: { id: shiftId } });
+        if (!existing) {
+          return NextResponse.json({ error: 'Shift not found' }, { status: 404 });
+        }
+        if (existing.userId && existing.userId !== actor.id) {
+          return NextResponse.json({ error: 'Shift is already assigned' }, { status: 409 });
+        }
+
+        const updated = await prisma.volunteerShift.update({
+          where: { id: shiftId },
+          data: {
+            userId: actor.id,
+            status: 'ASSIGNED',
+          },
+          include: {
+            user: { select: { fullName: true } },
+          },
+        });
+
+        return NextResponse.json({
+          success: true,
+          shift: await serializeShift(updated),
+          message: `Successfully signed up for ${updated.role} shift`,
+        });
       }
-      
-      const hours = endTime && startTime 
-        ? (parseInt(endTime.split(':')[0]) - parseInt(startTime.split(':')[0]))
-        : 2;
-      
-      const shift: VolunteerShift = {
-        id: 'vs-' + Date.now(),
-        userId,
-        userName: userName || 'Volunteer',
-        eventId,
-        eventName: eventName || 'Volunteer Event',
-        role,
-        date,
-        startTime: startTime || '09:00',
-        endTime: endTime || '11:00',
-        hours,
-        status: 'ASSIGNED',
-        createdAt: new Date().toISOString(),
-      };
-      
-      shifts.set(shift.id, shift);
-      
+
+      const eventId = typeof body.eventId === 'string' ? body.eventId : '';
+      const role = typeof body.role === 'string' ? body.role : '';
+      const date = typeof body.date === 'string' && body.date ? new Date(body.date) : null;
+      const hours = typeof body.hours === 'number' ? body.hours : null;
+
+      if (!eventId || !role || !date) {
+        return NextResponse.json({ error: 'eventId, role, and date required' }, { status: 400 });
+      }
+
+      const created = await prisma.volunteerShift.create({
+        data: {
+          userId: actor.id,
+          eventId,
+          eventName: typeof body.eventName === 'string' ? body.eventName : null,
+          role,
+          date,
+          startTime: typeof body.startTime === 'string' ? body.startTime : null,
+          endTime: typeof body.endTime === 'string' ? body.endTime : null,
+          hours,
+          status: 'ASSIGNED',
+          notes: typeof body.notes === 'string' ? body.notes : null,
+        },
+        include: {
+          user: { select: { fullName: true } },
+        },
+      });
+
       return NextResponse.json({
         success: true,
-        shift,
-        message: `Successfully signed up for ${role} shift`,
-      });
+        shift: await serializeShift(created),
+        message: `Successfully signed up for ${created.role} shift`,
+      }, { status: 201 });
     }
-    
-    if (action === 'cancel') {
-      const { shiftId } = body;
-      
+
+    if (action === 'cancel' || action === 'complete' || action === 'confirm') {
+      const shiftId = typeof body.shiftId === 'string' ? body.shiftId : '';
       if (!shiftId) {
         return NextResponse.json({ error: 'shiftId required' }, { status: 400 });
       }
-      
-      const shift = shifts.get(shiftId);
-      if (!shift) {
+
+      const existing = await prisma.volunteerShift.findUnique({ where: { id: shiftId } });
+      if (!existing) {
         return NextResponse.json({ error: 'Shift not found' }, { status: 404 });
       }
-      
-      shift.status = 'CANCELLED';
-      
+
+      const isOwner = existing.userId === actor.id;
+      if (!isOwner && !canManage(actor.role)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+
+      const nextStatus = action === 'cancel' ? 'CANCELLED' : action === 'complete' ? 'COMPLETED' : 'CONFIRMED';
+      const updated = await prisma.volunteerShift.update({
+        where: { id: shiftId },
+        data: { status: nextStatus },
+        include: {
+          user: { select: { fullName: true } },
+        },
+      });
+
       return NextResponse.json({
         success: true,
-        shift,
-        message: 'Shift cancelled',
+        shift: await serializeShift(updated),
+        message: action === 'cancel' ? 'Shift cancelled' : action === 'complete' ? 'Shift marked as completed' : 'Shift confirmed',
       });
     }
-    
-    if (action === 'complete') {
-      const { shiftId } = body;
-      
-      if (!shiftId) {
-        return NextResponse.json({ error: 'shiftId required' }, { status: 400 });
-      }
-      
-      const shift = shifts.get(shiftId);
-      if (!shift) {
-        return NextResponse.json({ error: 'Shift not found' }, { status: 404 });
-      }
-      
-      shift.status = 'COMPLETED';
-      
-      return NextResponse.json({
-        success: true,
-        shift,
-        message: 'Shift marked as completed',
-      });
-    }
-    
-    return NextResponse.json(
-      { error: 'Invalid action. Use: signup, cancel, complete' },
-      { status: 400 }
-    );
-    
+
+    return NextResponse.json({ error: 'Invalid action. Use: signup, cancel, complete, confirm' }, { status: 400 });
   } catch (error) {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Volunteer shifts API error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-// Get available volunteer roles
 export async function PUT(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const action = searchParams.get('action');
-  
-  if (action === 'roles') {
-    return NextResponse.json({
-      roles: [
-        { id: 'ID_CHECKER', name: 'ID Checker', description: 'Verify player IDs at check-in', hoursPerShift: 2 },
-        { id: 'SETUP', name: 'Field Setup', description: 'Set up goals, flags, equipment', hoursPerShift: 2 },
-        { id: 'TEAR_DOWN', name: 'Field Tear Down', description: 'Put away equipment after games', hoursPerShift: 1 },
-        { id: 'SCOREKEEPER', name: 'Scorekeeper', description: 'Keep official match scores', hoursPerShift: 2 },
-        { id: 'CONCESSIONS', name: 'Concessions', description: 'Manage food and beverage stand', hoursPerShift: 4 },
-        { id: 'FIELD_MONITOR', name: 'Field Monitor', description: 'Patrol fields, report issues', hoursPerShift: 2 },
-      ],
-    });
+  const actor = await getActor(request);
+  if (!actor || !actor.isActive) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  
-  return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+
+  const { searchParams } = new URL(request.url);
+  if (searchParams.get('action') !== 'roles') {
+    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+  }
+
+  return NextResponse.json({
+    roles: [
+      { id: 'ID_CHECKER', name: 'ID Checker', description: 'Verify player IDs at check-in', hoursPerShift: 2 },
+      { id: 'SETUP', name: 'Field Setup', description: 'Set up goals, flags, equipment', hoursPerShift: 2 },
+      { id: 'TEAR_DOWN', name: 'Field Tear Down', description: 'Put away equipment after games', hoursPerShift: 1 },
+      { id: 'SCOREKEEPER', name: 'Scorekeeper', description: 'Keep official match scores', hoursPerShift: 2 },
+      { id: 'CONCESSIONS', name: 'Concessions', description: 'Manage food and beverage stand', hoursPerShift: 4 },
+      { id: 'FIELD_MONITOR', name: 'Field Monitor', description: 'Patrol fields, report issues', hoursPerShift: 2 },
+    ],
+  });
 }

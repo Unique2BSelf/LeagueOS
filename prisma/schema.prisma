@@ -242,10 +242,18 @@ model Match {
   gameLengthMinutes Int?                @default(60)
   homeScore         Int?
   awayScore         Int?
+  currentMinute     Int                 @default(0)
   status            MatchStatus         @default(SCHEDULED)
   checklistDone     Boolean             @default(false)
+  fieldInspected    Boolean             @default(false)
+  playerCardsChecked Boolean            @default(false)
+  teamsPresent      Boolean             @default(false)
+  refereeConfirmed  Boolean             @default(false)
+  startedAt         DateTime?
+  endedAt           DateTime?
   streamLink        String?
   weatherStatus     String?
+  reportNotes       String?
   seasonId          String
 
   homeTeam          Team                @relation("Home", fields: [homeTeamId], references: [id])
@@ -254,6 +262,7 @@ model Match {
   subs              Sub[]
   availability      MatchAvailability[]
   disciplinary      DisciplinaryAction[]
+  events            MatchEvent[]
   season            Season              @relation(fields: [seasonId], references: [id])
 }
 
@@ -459,14 +468,19 @@ model OfficialCertification {
 
 model VolunteerShift {
   id            String              @id @default(uuid())
-  userId        String
+  userId        String?
   eventId       String
   role          String
   hours         Float?
   status        String              @default("ASSIGNED")
+  eventName     String?
+  date          DateTime?
+  startTime     String?
+  endTime       String?
+  notes         String?
   createdAt     DateTime            @default(now())
 
-  user          User                @relation(fields: [userId], references: [id])
+  user          User?               @relation(fields: [userId], references: [id])
 }
 
 model FundraisingCampaign {
@@ -484,10 +498,29 @@ model MaintenanceLog {
   fieldId       String
   issue         String
   status        String              @default("OPEN")
+  priority      String              @default("MEDIUM")
   notes         String?
+  reportedBy    String?
+  resolvedAt    DateTime?
   createdAt     DateTime            @default(now())
 
   field         Field               @relation(fields: [fieldId], references: [id])
+}
+
+model MatchEvent {
+  id            String              @id @default(uuid())
+  matchId       String
+  type          String
+  minute        Int                 @default(0)
+  teamId        String?
+  playerId      String?
+  playerName    String?
+  description   String?
+  createdAt     DateTime            @default(now())
+
+  match         Match               @relation(fields: [matchId], references: [id])
+
+  @@index([matchId, createdAt])
 }
 
 // ============ FEATURE 7: MERCHANDISE/STORE ============
