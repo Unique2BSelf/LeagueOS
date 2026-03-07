@@ -33,6 +33,7 @@ enum MatchType {
 
 enum TransactionType {
   REGISTRATION
+  INSURANCE
   FINE
   REF_PAYOUT
   SPONSORSHIP

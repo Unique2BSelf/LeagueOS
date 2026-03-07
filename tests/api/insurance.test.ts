@@ -4,18 +4,31 @@ import { createJsonRequest } from '../helpers/request';
 const prismaMock = {
   insurancePolicy: {
     findFirst: vi.fn(),
-    create: vi.fn(),
-  },
-  registration: {
-    findMany: vi.fn(),
-    update: vi.fn(),
   },
   user: {
+    findUnique: vi.fn(),
+  },
+  payment: {
+    create: vi.fn(),
     update: vi.fn(),
   },
 };
 
+const stripeSessionCreateMock = vi.fn();
+const getStripeClientMock = vi.fn(() => ({
+  checkout: {
+    sessions: {
+      create: stripeSessionCreateMock,
+    },
+  },
+}));
+const getRequestOriginMock = vi.fn(() => 'https://dev.corridor.soccer');
+
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
+vi.mock('@/lib/stripe', () => ({
+  getStripeClient: getStripeClientMock,
+  getRequestOrigin: getRequestOriginMock,
+}));
 
 describe('POST /api/insurance', () => {
   beforeEach(() => {
@@ -33,18 +46,23 @@ describe('POST /api/insurance', () => {
     await expect(response.json()).resolves.toEqual({ error: 'Unauthorized' });
   });
 
-  it('creates a 365-day active policy and updates the user insurance state', async () => {
+  it('creates a Stripe Checkout session for annual insurance', async () => {
     prismaMock.insurancePolicy.findFirst.mockResolvedValueOnce(null);
-    prismaMock.insurancePolicy.create.mockImplementationOnce(async ({ data }) => ({
-      id: 'policy-1',
-      ...data,
-    }));
-    prismaMock.registration.findMany.mockResolvedValueOnce([
-      { id: 'reg-1', paid: true, status: 'PENDING' },
-      { id: 'reg-2', paid: false, status: 'PENDING' },
-    ]);
-    prismaMock.registration.update.mockResolvedValue({});
-    prismaMock.user.update.mockResolvedValueOnce({});
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      fullName: 'Player One',
+      email: 'player@example.com',
+    });
+    prismaMock.payment.create.mockResolvedValueOnce({
+      id: 'payment-1',
+    });
+    prismaMock.payment.update.mockResolvedValueOnce({
+      id: 'payment-1',
+      stripeSessionId: 'cs_ins_123',
+    });
+    stripeSessionCreateMock.mockResolvedValueOnce({
+      id: 'cs_ins_123',
+      url: 'https://checkout.stripe.test/insurance/123',
+    });
 
     const { POST } = await import('@/app/api/insurance/route');
     const response = await POST(createJsonRequest('http://localhost/api/insurance', {
@@ -55,46 +73,17 @@ describe('POST /api/insurance', () => {
 
     expect(response.status).toBe(200);
     const payload = await response.json();
-    expect(payload.message).toContain('Insurance purchased successfully');
-    expect(prismaMock.insurancePolicy.create).toHaveBeenCalled();
-
-    const createCall = prismaMock.insurancePolicy.create.mock.calls[0][0];
-    expect(createCall.data.userId).toBe('player-1');
-    expect(createCall.data.status).toBe('ACTIVE');
-
-    const days = Math.round((new Date(createCall.data.endDate).getTime() - new Date(createCall.data.startDate).getTime()) / (1000 * 60 * 60 * 24));
-    expect(days).toBe(365);
-
-    expect(prismaMock.user.update).toHaveBeenCalledWith({
-      where: { id: 'player-1' },
-      data: expect.objectContaining({
-        isInsured: true,
-      }),
-    });
-    expect(prismaMock.registration.findMany).toHaveBeenCalledWith({
-      where: {
+    expect(payload.checkoutUrl).toBe('https://checkout.stripe.test/insurance/123');
+    expect(payload.stripeSessionId).toBe('cs_ins_123');
+    expect(payload.paymentId).toBe('payment-1');
+    expect(stripeSessionCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'payment',
+      metadata: expect.objectContaining({
+        paymentId: 'payment-1',
+        paymentKind: 'INSURANCE',
         userId: 'player-1',
-        status: { not: 'REJECTED' },
-      },
-      select: {
-        id: true,
-        paid: true,
-        status: true,
-      },
-    });
-    expect(prismaMock.registration.update).toHaveBeenNthCalledWith(1, {
-      where: { id: 'reg-1' },
-      data: expect.objectContaining({
-        insuranceStatus: 'VALID',
-        status: 'APPROVED',
+        provider: 'LEAGUE_PROVIDED',
       }),
-    });
-    expect(prismaMock.registration.update).toHaveBeenNthCalledWith(2, {
-      where: { id: 'reg-2' },
-      data: expect.objectContaining({
-        insuranceStatus: 'VALID',
-        status: 'PENDING',
-      }),
-    });
+    }));
   });
 });

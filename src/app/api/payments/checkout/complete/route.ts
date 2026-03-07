@@ -22,8 +22,9 @@ export async function POST(request: NextRequest) {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     const registrationId = session.metadata?.registrationId;
     const ledgerEntryId = session.metadata?.ledgerEntryId;
+    const paymentKind = session.metadata?.paymentKind;
 
-    if (!registrationId && !ledgerEntryId) {
+    if (!registrationId && !ledgerEntryId && paymentKind !== 'INSURANCE') {
       return NextResponse.json({ error: 'Missing payment metadata' }, { status: 400 });
     }
 
@@ -55,6 +56,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (paymentKind === 'INSURANCE') {
+      const paymentId = session.metadata?.paymentId;
+      if (!paymentId) {
+        return NextResponse.json({ error: 'Missing insurance payment id' }, { status: 400 });
+      }
+
+      const payment = await prisma.payment.findUnique({
+        where: { id: paymentId },
+      });
+
+      if (!payment) {
+        return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
+      }
+
+      if (payment.userId !== userId) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+    }
+
     const finalized = await finalizeStripeCheckoutSession(session) as any;
 
     return NextResponse.json({
@@ -62,7 +82,8 @@ export async function POST(request: NextRequest) {
       registrationId: registrationId || null,
       ledgerEntryId: ledgerEntryId || null,
       paymentId: session.id,
-      status: registrationId ? 'APPROVED' : 'PAID',
+      status: paymentKind === 'INSURANCE' ? 'INSURED' : registrationId ? 'APPROVED' : 'PAID',
+      finalized,
     });
   } catch (error) {
     console.error('Error completing Stripe checkout:', error);

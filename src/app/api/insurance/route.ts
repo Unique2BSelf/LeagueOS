@@ -1,36 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { resolveRegistrationStatus } from '@/lib/registrations';
+import { PaymentMethod, TransactionType } from '@prisma/client';
+import { getRequestOrigin, getStripeClient } from '@/lib/stripe';
+import { activateAnnualInsuranceForUser } from '@/lib/insurance';
+import { createPaymentRecord } from '@/lib/payments';
 
-async function syncRegistrationsForActiveInsurance(userId: string, startDate: Date, endDate: Date) {
-  const insuranceStatus = endDate <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) ? 'EXPIRING_SOON' : 'VALID';
-  const registrations = await prisma.registration.findMany({
-    where: {
-      userId,
-      status: { not: 'REJECTED' },
-    },
-    select: {
-      id: true,
-      paid: true,
-      status: true,
-    },
-  });
-
-  await Promise.all(registrations.map((registration) => (
-    prisma.registration.update({
-      where: { id: registration.id },
-      data: {
-        insuranceStatus,
-        insurancePurchasedAt: startDate,
-        status: resolveRegistrationStatus({
-          paid: registration.paid,
-          insuranceStatus,
-          currentStatus: registration.status,
-        }),
-      },
-    })
-  )));
-}
+export const runtime = 'nodejs';
 
 // GET /api/insurance - Get user's current insurance status
 export async function GET(request: NextRequest) {
@@ -77,7 +52,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/insurance - Purchase new insurance policy (365-day token per PRD)
+// POST /api/insurance - Start insurance checkout
 export async function POST(request: NextRequest) {
   try {
     const userId = request.headers.get('x-user-id');
@@ -86,7 +61,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { provider = 'LEAGUE_PROVIDED', cost = 50.00 } = await request.json();
+    const { provider = 'LEAGUE_PROVIDED', cost = 50.00, method = 'CARD' } = await request.json();
 
     // Check for existing active policy
     const existing = await prisma.insurancePolicy.findFirst({
@@ -105,36 +80,68 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Create new 365-day policy
-    const startDate = new Date();
-    const endDate = new Date();
-    endDate.setDate(endDate.getDate() + 365); // 365-day token per PRD
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        fullName: true,
+        email: true,
+      },
+    });
 
-    const policy = await prisma.insurancePolicy.create({
-      data: {
+    if (!user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    const payment = await createPaymentRecord({
+      userId,
+      amount: cost,
+      method: method === 'APPLE_PAY' ? PaymentMethod.APPLE_PAY : PaymentMethod.CARD,
+      transactionType: TransactionType.INSURANCE,
+      notes: 'ANNUAL_INSURANCE',
+    });
+
+    const stripe = getStripeClient();
+    const origin = getRequestOrigin(request);
+    const checkoutSession = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      success_url: `${origin}/dashboard/insurance-status?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/dashboard/insurance-status?payment=cancelled`,
+      customer_email: user.email,
+      metadata: {
+        paymentId: payment.id,
+        paymentKind: 'INSURANCE',
         userId,
         provider,
-        startDate,
-        endDate,
-        cost,
-        status: 'ACTIVE',
       },
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: 'usd',
+            unit_amount: Math.round(Number(cost) * 100),
+            product_data: {
+              name: 'Annual League Insurance',
+              description: `365-day annual insurance coverage for ${user.fullName}`,
+            },
+          },
+        },
+      ],
     });
 
-    // Update user's insurance status
-    await prisma.user.update({
-      where: { id: userId },
+    await prisma.payment.update({
+      where: { id: payment.id },
       data: {
-        isInsured: true,
-        insuranceExpiry: endDate,
+        stripeSessionId: checkoutSession.id,
+        providerReference: checkoutSession.id,
       },
     });
-
-    await syncRegistrationsForActiveInsurance(userId, startDate, endDate);
 
     return NextResponse.json({
-      policy,
-      message: 'Insurance purchased successfully. Valid for 365 days.',
+      paymentId: payment.id,
+      amount: Number(cost),
+      checkoutUrl: checkoutSession.url,
+      stripeSessionId: checkoutSession.id,
+      message: 'Stripe Checkout session created for annual insurance.',
     });
   } catch (error) {
     console.error('Error purchasing insurance:', error);
@@ -162,33 +169,11 @@ export async function PATCH(request: NextRequest) {
       if (!existing) {
         return NextResponse.json({ error: 'Policy not found' }, { status: 404 });
       }
-
-      // Calculate new dates (extend from current end date or now)
-      const startDate = new Date();
-      const endDate = new Date();
-      endDate.setDate(endDate.getDate() + 365);
-
-      const renewed = await prisma.insurancePolicy.create({
-        data: {
-          userId,
-          provider: existing.provider,
-          startDate,
-          endDate,
-          cost: existing.cost,
-          status: 'ACTIVE',
-        },
+      const renewed = await activateAnnualInsuranceForUser({
+        userId,
+        provider: existing.provider,
+        cost: existing.cost,
       });
-
-      // Update user
-      await prisma.user.update({
-        where: { id: userId },
-        data: {
-          isInsured: true,
-          insuranceExpiry: endDate,
-        },
-      });
-
-      await syncRegistrationsForActiveInsurance(userId, startDate, endDate);
 
       return NextResponse.json({
         policy: renewed,

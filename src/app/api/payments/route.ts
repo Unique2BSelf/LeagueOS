@@ -49,6 +49,7 @@ function serializePayment(payment: any) {
     amount: payment.amount,
     method: payment.method,
     status: payment.status,
+    transactionType: payment.transactionType,
     notes: payment.notes,
     venmoHandle: payment.venmoHandle,
     stripeSessionId: payment.stripeSessionId,

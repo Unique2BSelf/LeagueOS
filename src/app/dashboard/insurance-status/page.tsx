@@ -40,6 +40,45 @@ export default function InsuranceStatusPage() {
       .finally(() => setLoading(false))
   }, [])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const params = new URLSearchParams(window.location.search)
+    const sessionId = params.get('session_id')
+    const paymentState = params.get('payment')
+
+    if (paymentState !== 'success' || !sessionId) {
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    setMessage(null)
+
+    fetch('/api/payments/checkout/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ sessionId }),
+    })
+      .then(async (response) => {
+        const data = await response.json()
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to finalize insurance payment')
+        }
+        setMessage('Annual insurance is now active. You can register for seasons.')
+        return fetchInsurance()
+      })
+      .catch((finalizeError) => setError(finalizeError instanceof Error ? finalizeError.message : 'Failed to finalize insurance payment'))
+      .finally(() => {
+        setSaving(false)
+        const cleanUrl = `${window.location.pathname}`
+        window.history.replaceState({}, '', cleanUrl)
+      })
+  }, [])
+
   const handlePurchaseInsurance = async () => {
     setSaving(true)
     setError(null)
@@ -56,8 +95,12 @@ export default function InsuranceStatusPage() {
         throw new Error(data.error || 'Failed to purchase insurance')
       }
 
-      setMessage('Annual insurance is now active. You can register for seasons.')
-      await fetchInsurance()
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl
+        return
+      }
+
+      throw new Error(data.message || 'Insurance checkout URL missing')
     } catch (purchaseError) {
       setError(purchaseError instanceof Error ? purchaseError.message : 'Failed to purchase insurance')
     } finally {

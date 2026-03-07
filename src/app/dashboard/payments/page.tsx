@@ -28,6 +28,8 @@ interface PaymentRecord {
   amount: number
   method: string
   status: string
+  transactionType: string
+  notes?: string | null
   updatedAt: string
   registration?: {
     seasonName?: string
@@ -269,7 +271,11 @@ export default function PaymentsPage() {
                       <Receipt className="w-5 h-5 text-cyan-400" />
                     </div>
                     <div>
-                      <p className="text-white font-medium">{payment.registration?.seasonName || 'Registration Payment'}</p>
+                      <p className="text-white font-medium">
+                        {payment.transactionType === 'INSURANCE'
+                          ? 'Annual Insurance'
+                          : payment.registration?.seasonName || 'Registration Payment'}
+                      </p>
                       <p className="text-white/50 text-sm">{new Date(payment.updatedAt).toLocaleString()} via {payment.method}</p>
                     </div>
                   </div>
