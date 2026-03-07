@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { Calendar, Loader2, Play, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { useSessionUser } from '@/hooks/use-session-user'
 
@@ -16,6 +17,14 @@ type Team = {
 type Field = {
   id: string
   name: string
+  location: string
+}
+
+type Location = {
+  id: string
+  name: string
+  address?: string | null
+  fields: Field[]
 }
 
 type Season = {
@@ -39,19 +48,34 @@ type ScheduledMatch = {
   seasonName: string
 }
 
-export default function ScheduleGeneratorPage() {
+function ScheduleGeneratorPageContent() {
+  const searchParams = useSearchParams()
   const { user, loading } = useSessionUser()
   const [generating, setGenerating] = useState(false)
+  const [creatingSpecial, setCreatingSpecial] = useState(false)
   const [dataLoading, setDataLoading] = useState(true)
   const [teams, setTeams] = useState<Team[]>([])
   const [fields, setFields] = useState<Field[]>([])
+  const [locations, setLocations] = useState<Location[]>([])
   const [matches, setMatches] = useState<ScheduledMatch[]>([])
   const [seasons, setSeasons] = useState<Season[]>([])
   const [formData, setFormData] = useState({
     seasonId: '',
+    locationId: '',
+    fieldIds: [] as string[],
     dates: '',
     gamesPerTeam: '10',
     maxGamesPerDay: '2',
+    mode: 'replace' as 'replace' | 'append',
+  })
+  const [specialMatch, setSpecialMatch] = useState({
+    homeTeamId: '',
+    awayTeamId: '',
+    fieldId: '',
+    date: '',
+    time: '18:00',
+    matchType: 'FRIENDLY',
+    gameLengthMinutes: '60',
   })
   const [stats, setStats] = useState<any>(null)
   const [conflicts, setConflicts] = useState<string[]>([])
@@ -97,22 +121,30 @@ export default function ScheduleGeneratorPage() {
     setError('')
 
     try {
-      const [seasonsRes, fieldsRes] = await Promise.all([
+      const [seasonsRes, fieldsRes, locationsRes] = await Promise.all([
         fetch('/api/scheduler?action=seasons'),
         fetch('/api/scheduler?action=fields'),
+        fetch('/api/scheduler?action=locations'),
       ])
 
       const seasonsData = await seasonsRes.json()
       const fieldsData = await fieldsRes.json()
+      const locationsData = await locationsRes.json()
       const availableSeasons = seasonsData.seasons || []
+      const availableLocations = locationsData.locations || []
 
       setSeasons(availableSeasons)
       setFields(fieldsData.fields || [])
+      setLocations(availableLocations)
 
-      const initialSeasonId = availableSeasons[0]?.id || ''
+      const requestedSeasonId = searchParams.get('seasonId')
+      const initialSeasonId = availableSeasons.find((season: Season) => season.id === requestedSeasonId)?.id || availableSeasons[0]?.id || ''
+      const initialLocationId = availableLocations[0]?.id || ''
       setFormData((current) => ({
         ...current,
         seasonId: current.seasonId || initialSeasonId,
+        locationId: current.locationId || initialLocationId,
+        fieldIds: current.fieldIds.length ? current.fieldIds : (availableLocations[0]?.fields || []).map((field: Field) => field.id),
         dates: current.dates || defaultDates,
       }))
 
@@ -141,6 +173,37 @@ export default function ScheduleGeneratorPage() {
     setTeams(teamsData.teams || [])
     setMatches(matchesData.matches || [])
     setStats(statsData)
+    setSpecialMatch((current) => ({
+      ...current,
+      homeTeamId: current.homeTeamId || teamsData.teams?.[0]?.id || '',
+      awayTeamId: current.awayTeamId || teamsData.teams?.[1]?.id || '',
+    }))
+  }
+
+  useEffect(() => {
+    const activeLocation = locations.find((location) => location.id === formData.locationId)
+    const locationFields = activeLocation?.fields || []
+    const nextFieldIds = formData.fieldIds.filter((fieldId) => locationFields.some((field) => field.id === fieldId))
+    const defaultFieldIds = locationFields.map((field) => field.id)
+
+    setFields(locationFields)
+    setFormData((current) => ({
+      ...current,
+      fieldIds: nextFieldIds.length ? nextFieldIds : defaultFieldIds,
+    }))
+    setSpecialMatch((current) => ({
+      ...current,
+      fieldId: locationFields.find((field) => field.id === current.fieldId)?.id || locationFields[0]?.id || '',
+    }))
+  }, [formData.locationId, locations])
+
+  const toggleField = (fieldId: string) => {
+    setFormData((current) => ({
+      ...current,
+      fieldIds: current.fieldIds.includes(fieldId)
+        ? current.fieldIds.filter((id) => id !== fieldId)
+        : [...current.fieldIds, fieldId],
+    }))
   }
 
   const generateSchedule = async () => {
@@ -161,7 +224,9 @@ export default function ScheduleGeneratorPage() {
           dates,
           gamesPerTeam: Number(formData.gamesPerTeam),
           maxGamesPerDay: Number(formData.maxGamesPerDay),
-          replaceExisting: true,
+          replaceExisting: formData.mode !== 'append',
+          locationId: formData.locationId || undefined,
+          fieldIds: formData.fieldIds,
         }),
       })
 
@@ -182,12 +247,44 @@ export default function ScheduleGeneratorPage() {
         scheduledMatches: data.generatedMatches,
         totalFields: fields.length,
       })
-      setSuccess(`Saved ${data.generatedMatches} matches for ${data.seasonName}.`)
+      setSuccess(`${formData.mode === 'append' ? 'Added' : 'Saved'} ${data.generatedMatches} matches for ${data.seasonName}.`)
     } catch (err) {
       console.error('Schedule generation failed:', err)
       setError(err instanceof Error ? err.message : 'Schedule generation failed')
     } finally {
       setGenerating(false)
+    }
+  }
+
+  const createSpecialMatch = async () => {
+    setCreatingSpecial(true)
+    setError('')
+    setSuccess('')
+
+    try {
+      const res = await fetch('/api/scheduler', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create-special',
+          seasonId: formData.seasonId,
+          ...specialMatch,
+          gameLengthMinutes: Number(specialMatch.gameLengthMinutes),
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to create special match')
+      }
+
+      await fetchSeasonData(formData.seasonId)
+      setSuccess('Special match created and added to the season schedule.')
+    } catch (err) {
+      console.error('Failed to create special match:', err)
+      setError(err instanceof Error ? err.message : 'Failed to create special match')
+    } finally {
+      setCreatingSpecial(false)
     }
   }
 
@@ -275,6 +372,21 @@ export default function ScheduleGeneratorPage() {
               </select>
             </div>
             <div>
+              <label className="block text-white/70 mb-1">Location</label>
+              <select
+                value={formData.locationId}
+                onChange={(e) => setFormData({ ...formData, locationId: e.target.value })}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white"
+                data-testid="schedule-location-select"
+              >
+                {locations.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {location.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
               <label className="block text-white/70 mb-1">Game Dates (comma-separated)</label>
               <input
                 type="text"
@@ -310,9 +422,47 @@ export default function ScheduleGeneratorPage() {
             </div>
           </div>
 
+          <div className="mb-4">
+            <label className="block text-white/70 mb-2">Fields To Use</label>
+            <div className="grid gap-2 md:grid-cols-2" data-testid="schedule-fields-list">
+              {fields.map((field) => (
+                <label key={field.id} className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white">
+                  <input
+                    type="checkbox"
+                    checked={formData.fieldIds.includes(field.id)}
+                    onChange={() => toggleField(field.id)}
+                  />
+                  <span>{field.name}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-white/70 mb-2">Generation Mode</label>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, mode: 'replace' })}
+                className={`rounded-lg px-4 py-2 text-sm ${formData.mode === 'replace' ? 'bg-cyan-500/20 text-cyan-200' : 'bg-white/5 text-white/70'}`}
+                data-testid="schedule-mode-replace"
+              >
+                Replace Existing Schedule
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, mode: 'append' })}
+                className={`rounded-lg px-4 py-2 text-sm ${formData.mode === 'append' ? 'bg-cyan-500/20 text-cyan-200' : 'bg-white/5 text-white/70'}`}
+                data-testid="schedule-mode-append"
+              >
+                Append / Split Season
+              </button>
+            </div>
+          </div>
+
           <button
             onClick={generateSchedule}
-            disabled={generating || teams.length < 2 || !formData.seasonId}
+            disabled={generating || teams.length < 2 || !formData.seasonId || formData.fieldIds.length === 0}
             className="btn-primary flex items-center gap-2"
             data-testid="generate-schedule-button"
           >
@@ -329,9 +479,116 @@ export default function ScheduleGeneratorPage() {
             )}
           </button>
 
-          {teams.length < 2 && (
-            <p className="text-yellow-400 text-sm mt-2">Need at least 2 approved teams in this season to generate schedule</p>
+          {(teams.length < 2 || formData.fieldIds.length === 0) && (
+            <p className="text-yellow-400 text-sm mt-2">
+              {teams.length < 2
+                ? 'Need at least 2 approved teams in this season to generate schedule'
+                : 'Select at least one field to generate the schedule'}
+            </p>
           )}
+        </div>
+
+        <div className="glass-card p-4 mb-6">
+          <h2 className="text-lg font-bold text-white mb-4">Create Tournament / Special Match</h2>
+          <p className="text-sm text-white/50 mb-4">
+            Use this for playoffs, tournament matches, or manual end-of-season fixtures after standings are known.
+          </p>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-white/70 mb-1">Home Team</label>
+              <select
+                value={specialMatch.homeTeamId}
+                onChange={(e) => setSpecialMatch({ ...specialMatch, homeTeamId: e.target.value })}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white"
+                data-testid="special-home-team-select"
+              >
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>{team.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-white/70 mb-1">Away Team</label>
+              <select
+                value={specialMatch.awayTeamId}
+                onChange={(e) => setSpecialMatch({ ...specialMatch, awayTeamId: e.target.value })}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white"
+                data-testid="special-away-team-select"
+              >
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>{team.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-white/70 mb-1">Field</label>
+              <select
+                value={specialMatch.fieldId}
+                onChange={(e) => setSpecialMatch({ ...specialMatch, fieldId: e.target.value })}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white"
+                data-testid="special-field-select"
+              >
+                {fields.map((field) => (
+                  <option key={field.id} value={field.id}>{field.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-white/70 mb-1">Match Type</label>
+              <select
+                value={specialMatch.matchType}
+                onChange={(e) => setSpecialMatch({ ...specialMatch, matchType: e.target.value })}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white"
+                data-testid="special-match-type-select"
+              >
+                <option value="FRIENDLY">Tournament / Playoff</option>
+                <option value="REGULAR">Regular</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-4 mb-4">
+            <div>
+              <label className="block text-white/70 mb-1">Date</label>
+              <input
+                type="date"
+                value={specialMatch.date}
+                onChange={(e) => setSpecialMatch({ ...specialMatch, date: e.target.value })}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white"
+                data-testid="special-date-input"
+              />
+            </div>
+            <div>
+              <label className="block text-white/70 mb-1">Time</label>
+              <input
+                type="time"
+                value={specialMatch.time}
+                onChange={(e) => setSpecialMatch({ ...specialMatch, time: e.target.value })}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-white/70 mb-1">Length (minutes)</label>
+              <input
+                type="number"
+                min="30"
+                step="5"
+                value={specialMatch.gameLengthMinutes}
+                onChange={(e) => setSpecialMatch({ ...specialMatch, gameLengthMinutes: e.target.value })}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white"
+              />
+            </div>
+          </div>
+          <button
+            onClick={createSpecialMatch}
+            disabled={creatingSpecial || !specialMatch.homeTeamId || !specialMatch.awayTeamId || !specialMatch.fieldId || !specialMatch.date || specialMatch.homeTeamId === specialMatch.awayTeamId}
+            className="btn-secondary flex items-center gap-2"
+            data-testid="create-special-match-button"
+          >
+            {creatingSpecial ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            Create Special Match
+          </button>
         </div>
 
         {error && (
@@ -365,7 +622,11 @@ export default function ScheduleGeneratorPage() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-white">Persisted Schedule ({matches.length} matches)</h2>
-              <span className="text-white/50 text-sm">Generation overwrites the selected season&apos;s current schedule.</span>
+              <span className="text-white/50 text-sm">
+                {formData.mode === 'append'
+                  ? 'Append mode keeps the current season schedule and adds additional matches.'
+                  : 'Replace mode overwrites the selected season&apos;s current schedule.'}
+              </span>
             </div>
 
             <div className="overflow-x-auto">
@@ -403,5 +664,19 @@ export default function ScheduleGeneratorPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function ScheduleGeneratorPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-screen">
+          <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
+        </div>
+      }
+    >
+      <ScheduleGeneratorPageContent />
+    </Suspense>
   )
 }

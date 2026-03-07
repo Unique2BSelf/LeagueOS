@@ -6,8 +6,15 @@ import { createAuditLog } from '@/lib/audit';
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const action = searchParams.get('action');
+  const archived = searchParams.get('archived');
+
+  const where =
+    archived === 'all'
+      ? {}
+      : { isArchived: archived === 'true' };
 
   const teams = await prisma.team.findMany({
+    where,
     include: {
       division: true,
       players: true,
@@ -32,6 +39,7 @@ export async function GET(request: NextRequest) {
     isConfirmed: team.isConfirmed,
     approvalStatus: team.approvalStatus,
     rosterStatus: team.rosterStatus,
+    isArchived: team.isArchived,
     playersCount: team.players.filter((player) => player.status === 'APPROVED').length,
     openSlots: Math.max(
       0,
@@ -42,7 +50,7 @@ export async function GET(request: NextRequest) {
   }));
 
   if (action === 'available') {
-    return NextResponse.json(mapped.filter((team) => team.openSlots > 0));
+    return NextResponse.json(mapped.filter((team) => !team.isArchived && team.openSlots > 0));
   }
 
   return NextResponse.json(mapped);

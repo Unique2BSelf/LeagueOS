@@ -41,6 +41,7 @@ type Team = {
   approvalStatus: string
   rosterStatus: 'DRAFT' | 'SUBMITTED' | 'FINALIZED'
   isConfirmed: boolean
+  isArchived: boolean
   players: Array<{ userId: string; status: string }>
 }
 
@@ -60,6 +61,7 @@ export default function SeasonDetailPage() {
   const [approvalFilter, setApprovalFilter] = useState<'ALL' | 'APPROVED' | 'PENDING'>('ALL')
   const [rosterFilter, setRosterFilter] = useState<'ALL' | 'NEEDS_PLAYERS' | 'AT_MIN'>('ALL')
   const [workflowFilter, setWorkflowFilter] = useState<'ALL' | 'DRAFT' | 'SUBMITTED' | 'FINALIZED'>('ALL')
+  const [archiveFilter, setArchiveFilter] = useState<'ACTIVE' | 'ARCHIVED' | 'ALL'>('ACTIVE')
   const [sortMode, setSortMode] = useState<'name' | 'approved' | 'pending'>('name')
   const [formData, setFormData] = useState({
     name: '',
@@ -126,8 +128,11 @@ export default function SeasonDetailPage() {
         (rosterFilter === 'NEEDS_PLAYERS' ? approvedRosterCount < (team.season?.minRosterSize ?? 8) : approvedRosterCount >= (team.season?.minRosterSize ?? 8))
       const matchesWorkflow =
         workflowFilter === 'ALL' || team.rosterStatus === workflowFilter
+      const matchesArchive =
+        archiveFilter === 'ALL' ||
+        (archiveFilter === 'ARCHIVED' ? team.isArchived : !team.isArchived)
 
-      if (!matchesSearch || !matchesApproval || !matchesRoster || !matchesWorkflow) {
+      if (!matchesSearch || !matchesApproval || !matchesRoster || !matchesWorkflow || !matchesArchive) {
         continue
       }
 
@@ -155,7 +160,7 @@ export default function SeasonDetailPage() {
     }
 
     return grouped
-  }, [approvalFilter, rosterFilter, searchTerm, sortMode, teams, workflowFilter])
+  }, [approvalFilter, archiveFilter, rosterFilter, searchTerm, sortMode, teams, workflowFilter])
 
   const visibleTeamCount = useMemo(
     () => Array.from(divisionTeams.values()).reduce((total, divisionList) => total + divisionList.length, 0),
@@ -163,9 +168,14 @@ export default function SeasonDetailPage() {
   )
 
   const pendingVisibleTeams = useMemo(
-    () => Array.from(divisionTeams.values()).flat().filter((team) => team.approvalStatus !== 'APPROVED').map((team) => team.id),
+    () => Array.from(divisionTeams.values()).flat().filter((team) => !team.isArchived && team.approvalStatus !== 'APPROVED').map((team) => team.id),
     [divisionTeams],
   )
+
+  const archiveBuckets = useMemo(() => ({
+    active: Array.from(divisionTeams.values()).flat().filter((team) => !team.isArchived).map((team) => team.id),
+    archived: Array.from(divisionTeams.values()).flat().filter((team) => team.isArchived).map((team) => team.id),
+  }), [divisionTeams])
 
   const visibleTeamIdsByRosterStatus = useMemo(() => ({
     DRAFT: Array.from(divisionTeams.values()).flat().filter((team) => team.rosterStatus === 'DRAFT').map((team) => team.id),
@@ -296,7 +306,9 @@ export default function SeasonDetailPage() {
       ? [...visibleTeamIdsByRosterStatus.SUBMITTED, ...visibleTeamIdsByRosterStatus.FINALIZED]
       : visibleTeamIdsByRosterStatus[nextStatus === 'SUBMITTED' ? 'DRAFT' : 'SUBMITTED']
 
-    if (!teamIds.length) {
+    const activeTeamIds = teamIds.filter((teamId) => archiveBuckets.active.includes(teamId))
+
+    if (!activeTeamIds.length) {
       return
     }
 
@@ -307,7 +319,7 @@ export default function SeasonDetailPage() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          teamIds,
+          teamIds: activeTeamIds,
           action: 'SET_ROSTER_STATUS',
           rosterStatus: nextStatus,
         }),
@@ -319,6 +331,34 @@ export default function SeasonDetailPage() {
       await loadSeason()
     } catch (err: any) {
       setError(err.message || `Failed to set roster status to ${nextStatus}`)
+    } finally {
+      setTeamActionLoading(null)
+    }
+  }
+
+  const updateTeamArchive = async (teamIds: string[], action: 'ARCHIVE' | 'UNARCHIVE') => {
+    if (!teamIds.length) {
+      return
+    }
+
+    setTeamActionLoading(`BULK-${action}`)
+    setError('')
+    try {
+      const res = await fetch('/api/admin/teams', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          teamIds,
+          action,
+        }),
+      })
+      const payload = await res.json()
+      if (!res.ok) {
+        throw new Error(payload.error || `Failed to ${action.toLowerCase()} teams`)
+      }
+      await loadSeason()
+    } catch (err: any) {
+      setError(err.message || `Failed to ${action.toLowerCase()} teams`)
     } finally {
       setTeamActionLoading(null)
     }
@@ -521,6 +561,16 @@ export default function SeasonDetailPage() {
               <option value="SUBMITTED">Submitted only</option>
               <option value="FINALIZED">Finalized only</option>
             </select>
+            <select
+              value={archiveFilter}
+              onChange={(e) => setArchiveFilter(e.target.value as typeof archiveFilter)}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white xl:col-span-5"
+              data-testid="team-archive-filter"
+            >
+              <option value="ACTIVE">Active teams only</option>
+              <option value="ARCHIVED">Archived teams only</option>
+              <option value="ALL">All teams</option>
+            </select>
           </div>
 
           <div className="mb-5 flex flex-wrap gap-2">
@@ -551,6 +601,20 @@ export default function SeasonDetailPage() {
               className="rounded-lg bg-white/10 px-4 py-2.5 text-sm text-white/85 hover:bg-white/15 disabled:opacity-50"
             >
               {teamActionLoading === 'BULK-DRAFT' ? 'Reopening...' : `Reopen Visible (${visibleTeamIdsByRosterStatus.SUBMITTED.length + visibleTeamIdsByRosterStatus.FINALIZED.length})`}
+            </button>
+            <button
+              onClick={() => updateTeamArchive(archiveBuckets.active, 'ARCHIVE')}
+              disabled={!archiveBuckets.active.length || teamActionLoading !== null}
+              className="rounded-lg bg-amber-500/20 px-4 py-2.5 text-sm text-amber-200 hover:bg-amber-500/30 disabled:opacity-50"
+            >
+              {teamActionLoading === 'BULK-ARCHIVE' ? 'Archiving...' : `Archive Visible Active (${archiveBuckets.active.length})`}
+            </button>
+            <button
+              onClick={() => updateTeamArchive(archiveBuckets.archived, 'UNARCHIVE')}
+              disabled={!archiveBuckets.archived.length || teamActionLoading !== null}
+              className="rounded-lg bg-emerald-500/20 px-4 py-2.5 text-sm text-emerald-200 hover:bg-emerald-500/30 disabled:opacity-50"
+            >
+              {teamActionLoading === 'BULK-UNARCHIVE' ? 'Restoring...' : `Restore Visible Archived (${archiveBuckets.archived.length})`}
             </button>
           </div>
 
@@ -653,6 +717,11 @@ export default function SeasonDetailPage() {
                                               Below min roster
                                             </span>
                                           )}
+                                          {team.isArchived && (
+                                            <span className="rounded-full bg-white/10 px-2 py-1 text-xs text-white/65">
+                                              Archived
+                                            </span>
+                                          )}
                                           <span
                                             className={`rounded-full px-2 py-1 text-xs ${
                                               team.rosterStatus === 'FINALIZED'
@@ -689,6 +758,16 @@ export default function SeasonDetailPage() {
                                           {teamActionLoading === `APPROVE-${team.id}` ? 'Approving...' : 'Approve Team'}
                                         </button>
                                       )}
+                                      <button
+                                        onClick={() => updateTeamArchive([team.id], team.isArchived ? 'UNARCHIVE' : 'ARCHIVE')}
+                                        disabled={teamActionLoading !== null}
+                                        className="rounded-md bg-amber-500/20 px-3 py-2 text-xs text-amber-200 hover:bg-amber-500/30 disabled:opacity-50"
+                                        data-testid={`${team.isArchived ? 'unarchive' : 'archive'}-team-${team.id}`}
+                                      >
+                                        {teamActionLoading === `BULK-${team.isArchived ? 'UNARCHIVE' : 'ARCHIVE'}`
+                                          ? (team.isArchived ? 'Restoring...' : 'Archiving...')
+                                          : team.isArchived ? 'Restore Team' : 'Archive Team'}
+                                      </button>
                                     </div>
                                   </div>
                                 </div>

@@ -20,6 +20,8 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const action = searchParams.get('action');
   const seasonId = searchParams.get('seasonId');
+  const locationId = searchParams.get('locationId');
+  const fieldIds = searchParams.getAll('fieldId');
 
   try {
     if (action === 'seasons') {
@@ -33,7 +35,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (action === 'fields') {
-      const fields = await getSchedulerFields();
+      const fields = await getSchedulerFields(locationId, fieldIds);
       return NextResponse.json({ fields });
     }
 
@@ -115,6 +117,8 @@ export async function POST(request: NextRequest) {
         gamesPerTeam: Number(body.gamesPerTeam) || undefined,
         maxGamesPerDay: Number(body.maxGamesPerDay) || undefined,
         replaceExisting: body.replaceExisting !== false,
+        locationId: typeof body.locationId === 'string' ? body.locationId : undefined,
+        fieldIds: Array.isArray(body.fieldIds) ? body.fieldIds : undefined,
       });
 
       return NextResponse.json({
@@ -168,7 +172,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'create-special') {
-      const { homeTeamId, awayTeamId, fieldId, date, time, seasonId: specialSeasonId } = body;
+      const { homeTeamId, awayTeamId, fieldId, date, time, seasonId: specialSeasonId, matchType, gameLengthMinutes } = body;
 
       if (!homeTeamId || !awayTeamId || !fieldId || !date) {
         return NextResponse.json({ error: 'homeTeamId, awayTeamId, fieldId, and date are required' }, { status: 400 });
@@ -191,6 +195,8 @@ export async function POST(request: NextRequest) {
           awayTeamId,
           seasonId: targetSeasonId,
           status: 'SCHEDULED',
+          matchType: ['FRIENDLY', 'REGULAR', 'BYE'].includes(String(matchType)) ? matchType : 'FRIENDLY',
+          gameLengthMinutes: Number(gameLengthMinutes) || 60,
         },
       });
 

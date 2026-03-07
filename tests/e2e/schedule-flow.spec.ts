@@ -50,12 +50,23 @@ test.describe('MVP schedule flow', () => {
 
     await adminPage.goto('/dashboard/schedule-generator');
     await adminPage.getByTestId('schedule-season-select').selectOption(fixture.seasonId);
+    await adminPage.getByTestId('schedule-location-select').selectOption({ index: 0 });
     await adminPage.getByTestId('schedule-dates-input').fill(fixture.dates.join(','));
     await adminPage.getByTestId('generate-schedule-button').click();
 
     await expect(adminPage.getByText(new RegExp(`Saved \\d+ matches for ${fixture.seasonName}`))).toBeVisible();
     await expect(adminPage.getByTestId('generated-schedule-table')).toContainText(fixture.teamNames[0]);
     await expect(adminPage.getByTestId('generated-schedule-table')).toContainText(fixture.teamNames[1]);
+    await adminPage.getByTestId('schedule-mode-append').click();
+    await adminPage.getByTestId('generate-schedule-button').click();
+    await expect(adminPage.getByText(new RegExp(`Added \\d+ matches for ${fixture.seasonName}`))).toBeVisible();
+    await adminPage.getByTestId('special-home-team-select').selectOption(fixture.teamIds[0]);
+    await adminPage.getByTestId('special-away-team-select').selectOption(fixture.teamIds[1]);
+    await adminPage.getByTestId('special-field-select').selectOption({ index: 0 });
+    await adminPage.getByTestId('special-match-type-select').selectOption('FRIENDLY');
+    await adminPage.getByTestId('special-date-input').fill(fixture.dates[fixture.dates.length - 1]);
+    await adminPage.getByTestId('create-special-match-button').click();
+    await expect(adminPage.getByText('Special match created and added to the season schedule.')).toBeVisible();
 
     const publicContext = await browser.newContext({ baseURL });
     const publicPage = await publicContext.newPage();
@@ -63,6 +74,7 @@ test.describe('MVP schedule flow', () => {
     await expect(publicPage.getByRole('heading', { name: 'Match Schedule' })).toBeVisible();
     await expect(publicPage.getByTestId('public-schedule-season-select')).toHaveValue(fixture.seasonId);
     await expect(publicPage.getByTestId('public-schedule-match').first()).toContainText(fixture.teamNames[0]);
+    await expect(publicPage.getByText('FRIENDLY')).toBeVisible();
 
     await publicContext.close();
     await adminContext.close();

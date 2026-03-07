@@ -14,10 +14,13 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status'); // PENDING, APPROVED, REJECTED
     const seasonId = searchParams.get('seasonId');
+    const archived = searchParams.get('archived');
 
     const where: Record<string, unknown> = {};
     if (status) where.approvalStatus = status;
     if (seasonId) where.seasonId = seasonId;
+    if (archived === 'true') where.isArchived = true;
+    if (archived === 'false') where.isArchived = false;
 
     const allTeams = await prisma.team.findMany({
       where,
@@ -45,7 +48,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { teamIds, action, rejectionReason, rosterStatus } = body; // action: 'APPROVE' | 'REJECT' | 'SET_ROSTER_STATUS'
+    const { teamIds, action, rejectionReason, rosterStatus } = body; // action: 'APPROVE' | 'REJECT' | 'SET_ROSTER_STATUS' | 'ARCHIVE' | 'UNARCHIVE'
 
     if (!teamIds || !action) {
       return NextResponse.json({ error: 'teamIds and action required' }, { status: 400 });
@@ -87,6 +90,7 @@ export async function PATCH(request: NextRequest) {
           approvalStatus: team.approvalStatus,
           rosterStatus: team.rosterStatus,
           isConfirmed: team.isConfirmed,
+          isArchived: team.isArchived,
           approvedCount,
           seasonId: team.season.id,
           seasonName: team.season.name,
@@ -127,15 +131,24 @@ export async function PATCH(request: NextRequest) {
                   approvalStatus: 'REJECTED',
                   rejectionReason,
                 }
-              : {
-                  rosterStatus,
-                },
+              : action === 'SET_ROSTER_STATUS'
+                ? {
+                    rosterStatus,
+                  }
+                : {
+                    isArchived: action === 'ARCHIVE',
+                  },
         });
         results.push(updated);
 
         await createAuditLog({
           actor,
-          actionType: action === 'SET_ROSTER_STATUS' ? 'UPDATE' : action === 'APPROVE' ? 'APPROVE' : 'REJECT',
+          actionType:
+            action === 'SET_ROSTER_STATUS' || action === 'ARCHIVE' || action === 'UNARCHIVE'
+              ? 'UPDATE'
+              : action === 'APPROVE'
+                ? 'APPROVE'
+                : 'REJECT',
           entityType: 'TEAM',
           entityId: teamId,
           before,
@@ -143,6 +156,7 @@ export async function PATCH(request: NextRequest) {
             approvalStatus: updated.approvalStatus,
             rosterStatus: updated.rosterStatus,
             isConfirmed: updated.isConfirmed,
+            isArchived: updated.isArchived,
             approvedCount,
             seasonId: team.season.id,
             seasonName: team.season.name,
@@ -150,6 +164,10 @@ export async function PATCH(request: NextRequest) {
           notes:
             action === 'SET_ROSTER_STATUS'
               ? `Admin set official roster lifecycle to ${rosterStatus}`
+              : action === 'ARCHIVE'
+                ? 'Admin archived team'
+                : action === 'UNARCHIVE'
+                  ? 'Admin restored team from archive'
               : action === 'APPROVE'
                 ? 'Admin approved team'
                 : rejectionReason,

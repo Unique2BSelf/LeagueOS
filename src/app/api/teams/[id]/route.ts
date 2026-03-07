@@ -32,6 +32,7 @@ export async function GET(
         isConfirmed: dbTeam.isConfirmed,
         approvalStatus: dbTeam.approvalStatus,
         rosterStatus: dbTeam.rosterStatus,
+        isArchived: dbTeam.isArchived,
         inviteCode: dbTeam.inviteCode,
         inviteCodeExpiry: dbTeam.inviteCodeExpiry,
       });

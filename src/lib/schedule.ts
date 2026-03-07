@@ -132,8 +132,13 @@ export async function getSchedulerTeamsBySeason(seasonId?: string | null) {
   );
 }
 
-export async function getSchedulerFields() {
+export async function getSchedulerFields(locationId?: string | null, fieldIds?: string[] | null) {
+  const normalizedFieldIds = Array.isArray(fieldIds) ? fieldIds.filter(Boolean) : [];
   const fields = await prisma.field.findMany({
+    where: {
+      ...(locationId ? { locationId } : {}),
+      ...(normalizedFieldIds.length ? { id: { in: normalizedFieldIds } } : {}),
+    },
     include: { location: true },
   });
 
@@ -229,6 +234,8 @@ export async function generateSeasonSchedule(input: {
   gamesPerTeam?: number;
   maxGamesPerDay?: number;
   replaceExisting?: boolean;
+  locationId?: string | null;
+  fieldIds?: string[] | null;
 }) {
   const season = await resolveSeason(input.seasonId);
   if (!season) {
@@ -237,7 +244,7 @@ export async function generateSeasonSchedule(input: {
 
   const [teams, fields] = await Promise.all([
     getSchedulerTeamsBySeason(season.id),
-    getSchedulerFields(),
+    getSchedulerFields(input.locationId, input.fieldIds),
   ]);
 
   if (teams.length < 2) {

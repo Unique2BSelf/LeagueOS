@@ -115,6 +115,14 @@ test.describe('MVP team flow', () => {
     await adminPage.goto(`/dashboard/seasons/${seasonId}`);
     await expect(adminPage.getByTestId(`season-team-card-${createdTeamId}`)).toContainText(teamName);
     await expect(adminPage.getByTestId(`season-team-card-${createdTeamId}`)).toContainText('FINALIZED');
+    await adminPage.getByTestId(`archive-team-${createdTeamId}`).click();
+    await adminPage.getByTestId('team-archive-filter').selectOption('ARCHIVED');
+    await expect(adminPage.getByTestId(`season-team-card-${createdTeamId}`)).toBeVisible();
+    await expect(adminPage.getByTestId(`season-team-card-${createdTeamId}`)).toContainText('Archived');
+    await adminPage.getByTestId(`unarchive-team-${createdTeamId}`).click();
+    await adminPage.getByTestId('team-archive-filter').selectOption('ACTIVE');
+    await expect(adminPage.getByTestId(`season-team-card-${createdTeamId}`)).toBeVisible();
+    await expect(adminPage.getByTestId(`season-team-card-${createdTeamId}`)).not.toContainText('Archived');
 
     await playerContext.close();
     await adminContext.close();

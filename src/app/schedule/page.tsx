@@ -118,6 +118,11 @@ export default async function SchedulePage({
                       {match.divisionName ? (
                         <span className="text-xs px-2 py-1 rounded bg-white/10 text-gray-400">{match.divisionName}</span>
                       ) : null}
+                      {match.matchType !== 'REGULAR' ? (
+                        <span className="text-xs px-2 py-1 rounded bg-cyan-500/15 text-cyan-300">
+                          {match.matchType}
+                        </span>
+                      ) : null}
                     </div>
                     <div className="flex items-center gap-4 flex-1 justify-center text-center md:text-left">
                       <span className="text-white font-medium">{match.homeTeamName}</span>

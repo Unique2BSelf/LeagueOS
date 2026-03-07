@@ -20,6 +20,7 @@ interface Team {
   isConfirmed: boolean
   approvalStatus?: string
   rosterStatus?: 'DRAFT' | 'SUBMITTED' | 'FINALIZED'
+  isArchived?: boolean
   inviteCode?: string | null
   inviteCodeExpiry?: Date | null
 }
@@ -61,6 +62,7 @@ export default function TeamDashboardPage() {
   const [error, setError] = useState('')
   const [rosterActionLoading, setRosterActionLoading] = useState<string | null>(null)
   const [rosterStatusLoading, setRosterStatusLoading] = useState<string | null>(null)
+  const [archiveLoading, setArchiveLoading] = useState(false)
   const [isCaptain, setIsCaptain] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState<SearchUser[]>([])
@@ -315,6 +317,33 @@ export default function TeamDashboardPage() {
     }
   }
 
+  const updateArchivedState = async (action: 'ARCHIVE' | 'UNARCHIVE') => {
+    if (!team) return
+    setArchiveLoading(true)
+    setError('')
+
+    try {
+      const res = await fetch('/api/admin/teams', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          teamIds: [team.id],
+          action,
+        }),
+      })
+      const payload = await res.json()
+      if (!res.ok) {
+        throw new Error(payload.error || `Failed to ${action.toLowerCase()} team`)
+      }
+
+      setTeam((current) => current ? { ...current, isArchived: action === 'ARCHIVE' } : current)
+    } catch (err: any) {
+      setError(err.message || `Failed to ${action.toLowerCase()} team`)
+    } finally {
+      setArchiveLoading(false)
+    }
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div className="mb-2">
@@ -341,6 +370,7 @@ export default function TeamDashboardPage() {
                   <span>{approvedCount} approved players</span>
                   <span>{pendingCount} pending</span>
                   <span>Roster target {minRosterSize}-{maxRosterSize}</span>
+                  {team?.isArchived && <span className="text-amber-300">Archived team</span>}
                 </div>
               </div>
             </div>
@@ -359,6 +389,10 @@ export default function TeamDashboardPage() {
                 <div className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${rosterStatusTone}`} data-testid="team-roster-status-badge">
                   {rosterStatus}
                 </div>
+              </div>
+              <div className="rounded-lg bg-white/5 px-4 py-3 text-center">
+                <div className="text-xs uppercase tracking-wide text-white/40">Archive State</div>
+                <div className="mt-1 text-white font-semibold">{team?.isArchived ? 'Archived' : 'Active'}</div>
               </div>
             </div>
           </div>
@@ -412,6 +446,18 @@ export default function TeamDashboardPage() {
                   </div>
                 )}
               </div>
+              {user?.role === 'ADMIN' && (
+                <div className="mt-4 border-t border-white/10 pt-4">
+                  <button
+                    onClick={() => updateArchivedState(team?.isArchived ? 'UNARCHIVE' : 'ARCHIVE')}
+                    disabled={archiveLoading}
+                    className="rounded-md bg-amber-500/20 px-3 py-2 text-xs font-medium text-amber-200 hover:bg-amber-500/30 disabled:opacity-50"
+                    data-testid="team-archive-toggle"
+                  >
+                    {archiveLoading ? 'Saving...' : team?.isArchived ? 'Restore Team From Archive' : 'Archive Team'}
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="mb-4 flex items-center justify-between">

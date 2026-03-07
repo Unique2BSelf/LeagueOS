@@ -178,6 +178,7 @@ model Team {
   escrowTarget      Float
   currentBalance    Float               @default(0)
   isConfirmed       Boolean             @default(false)
+  isArchived        Boolean             @default(false)
   approvalStatus    String              @default("PENDING") // PENDING, APPROVED, REJECTED
   rejectionReason   String?             // Reason if rejected
   rosterStatus      TeamRosterStatus    @default(DRAFT)
