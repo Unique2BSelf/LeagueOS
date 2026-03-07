@@ -54,6 +54,7 @@ export const dashboardNavGroups: DashboardNavGroup[] = [
     description: 'Personal registration and eligibility',
     items: [
       { href: '/dashboard/id', label: 'Digital ID', icon: User, description: 'Player identity card' },
+      { href: '/dashboard/insurance-status', label: 'Annual Insurance', icon: Shield, description: 'Required before season registration' },
       { href: '/dashboard/registrations', label: 'Season Registration', icon: ClipboardList, description: 'Register and track season status' },
       { href: '/dashboard/payments', label: 'Payments', icon: CreditCard, description: 'Registration and payment history' },
       { href: '/dashboard/availability', label: 'Availability', icon: Calendar, description: 'Set match availability' },

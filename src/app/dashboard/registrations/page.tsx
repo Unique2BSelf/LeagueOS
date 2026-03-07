@@ -26,6 +26,14 @@ interface Registration {
   paid: boolean
   amount?: number
   createdAt: string
+  insuranceStatus?: string
+}
+
+interface InsuranceStatus {
+  hasActiveInsurance: boolean
+  daysUntilExpiry: number | null
+  isExpiringSoon: boolean
+  isExpired: boolean
 }
 
 export default function RegistrationsPage() {
@@ -39,6 +47,7 @@ export default function RegistrationsPage() {
   const [payingSeason, setPayingSeason] = useState<Season | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [insuranceLoading, setInsuranceLoading] = useState(false)
+  const [insuranceStatus, setInsuranceStatus] = useState<InsuranceStatus | null>(null)
 
   useEffect(() => {
     const storedUser = getStoredUser()
@@ -49,7 +58,7 @@ export default function RegistrationsPage() {
       return
     }
 
-    Promise.all([fetchSeasons(), fetchRegistrations()]).finally(() => setLoading(false))
+    Promise.all([fetchSeasons(), fetchRegistrations(), fetchInsuranceStatus()]).finally(() => setLoading(false))
   }, [])
 
   const fetchSeasons = async () => {
@@ -89,6 +98,19 @@ export default function RegistrationsPage() {
     setRegistrations(data)
   }
 
+  const fetchInsuranceStatus = async () => {
+    const res = await fetch('/api/insurance', {
+      headers: getAuthHeaders(),
+    })
+
+    if (!res.ok) {
+      return
+    }
+
+    const data = await res.json()
+    setInsuranceStatus(data)
+  }
+
   const handleRegister = async (seasonId: string) => {
     setRegistering(seasonId)
     setError(null)
@@ -116,6 +138,7 @@ export default function RegistrationsPage() {
         paid: reg.paid,
         amount: reg.amount,
         createdAt: reg.createdAt,
+        insuranceStatus: reg.insuranceStatus,
       }
 
       setRegistrations((current) => [newReg, ...current])
@@ -154,6 +177,8 @@ export default function RegistrationsPage() {
       }
 
       setError('Insurance purchased successfully. You can register now.')
+      await fetchInsuranceStatus()
+      await fetchRegistrations()
     } catch (purchaseError) {
       console.error('Failed to purchase insurance:', purchaseError)
       setError(purchaseError instanceof Error ? purchaseError.message : 'Failed to purchase insurance')
@@ -173,7 +198,7 @@ export default function RegistrationsPage() {
     setRegistrations((current) =>
       current.map((registration) =>
         registration.id === payingRegistration?.id
-          ? { ...registration, paid: true, status: 'APPROVED' }
+          ? { ...registration, paid: true, status: insuranceStatus?.hasActiveInsurance ? 'APPROVED' : 'PENDING' }
           : registration
       )
     )
@@ -228,6 +253,38 @@ export default function RegistrationsPage() {
       <div className="glass-card p-6">
         <h1 className="text-2xl font-bold text-white mb-2">Season Registration</h1>
         <p className="text-white/50 mb-6">Register for upcoming seasons and pay fees</p>
+
+        {insuranceStatus?.hasActiveInsurance === false && (
+          <div className="mb-6 rounded-2xl border border-red-500/35 bg-red-500/10 px-5 py-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-red-200">
+                  <AlertCircle className="h-5 w-5" />
+                  <span className="text-sm font-semibold uppercase tracking-[0.16em]">Registration Blocked</span>
+                </div>
+                <h2 className="mt-2 text-lg font-semibold text-white">Annual insurance is required before any season registration</h2>
+                <p className="mt-1 text-sm text-red-100/85">
+                  Buy your annual insurance first. Once it is active, season registration unlocks automatically.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={handlePurchaseInsurance}
+                  disabled={insuranceLoading}
+                  className="rounded-full bg-red-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-60"
+                >
+                  {insuranceLoading ? 'Purchasing...' : 'Buy Annual Insurance ($50)'}
+                </button>
+                <Link
+                  href="/dashboard/insurance-status"
+                  className="rounded-full border border-red-300/30 px-4 py-2 text-sm font-semibold text-red-100"
+                >
+                  View Insurance Status
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className={`mb-6 rounded-lg border px-4 py-3 text-sm ${
@@ -345,7 +402,11 @@ export default function RegistrationsPage() {
                     {existingReg.status === 'PENDING' && !existingReg.paid ? (
                       <p className="text-yellow-400">Registration Pending - Payment Required</p>
                     ) : existingReg.status === 'PENDING' ? (
-                      <p className="text-yellow-400">Registration Pending Approval</p>
+                      <p className="text-yellow-400">
+                        {existingReg.insuranceStatus === 'REQUIRED'
+                          ? 'Registration paid - waiting for annual insurance'
+                          : 'Registration Pending Approval'}
+                      </p>
                     ) : existingReg.status === 'APPROVED' ? (
                       <p className="text-green-400 flex items-center justify-center gap-1">
                         <Check className="w-4 h-4" /> Registration Approved!
@@ -357,7 +418,7 @@ export default function RegistrationsPage() {
                 ) : (
                   <button
                     onClick={() => handleRegister(season.id)}
-                    disabled={registering === season.id || season.spots === 0}
+                    disabled={registering === season.id || season.spots === 0 || insuranceStatus?.hasActiveInsurance === false}
                     className="w-full btn-primary flex items-center justify-center gap-2"
                   >
                     {registering === season.id ? (
@@ -369,6 +430,11 @@ export default function RegistrationsPage() {
                       <>
                         <X className="w-4 h-4" />
                         Full
+                      </>
+                    ) : insuranceStatus?.hasActiveInsurance === false ? (
+                      <>
+                        <AlertCircle className="w-4 h-4" />
+                        Annual Insurance Required
                       </>
                     ) : (
                       <>

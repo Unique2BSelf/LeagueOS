@@ -64,4 +64,36 @@ describe('POST /api/registrations', () => {
     await expect(response.json()).resolves.toEqual({ error: 'Waiver acceptance is required' });
     expect(prismaMock.registration.create).not.toHaveBeenCalled();
   });
+
+  it('blocks season registration when active annual insurance is required but missing', async () => {
+    prismaMock.registration.findUnique.mockResolvedValueOnce(null);
+    prismaMock.registrationForm.findUnique.mockResolvedValueOnce({
+      seasonId: 'season-1',
+      requireWaiver: false,
+      requireInsurance: true,
+      baseFee: 150,
+    });
+    prismaMock.insurancePolicy.findFirst.mockResolvedValueOnce(null);
+    prismaMock.season.findUnique.mockResolvedValueOnce({
+      id: 'season-1',
+      name: 'Spring 2026',
+      startDate: new Date('2026-03-01T00:00:00.000Z'),
+      endDate: new Date('2026-06-01T00:00:00.000Z'),
+      pricingTiers: [],
+    });
+
+    const { POST } = await import('@/app/api/registrations/route');
+    const response = await POST(createJsonRequest('http://localhost/api/registrations', {
+      method: 'POST',
+      headers: { 'x-user-id': 'player-1' },
+      body: { seasonId: 'season-1', waiverAgreed: true },
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Active annual insurance is required before you can register for a season',
+      code: 'INSURANCE_REQUIRED',
+    });
+    expect(prismaMock.registration.create).not.toHaveBeenCalled();
+  });
 });

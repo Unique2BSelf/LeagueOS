@@ -117,6 +117,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Season not found' }, { status: 404 });
     }
 
+    if (registrationForm?.requireInsurance !== false && !insurance) {
+      return NextResponse.json({
+        error: 'Active annual insurance is required before you can register for a season',
+        code: 'INSURANCE_REQUIRED',
+      }, { status: 400 });
+    }
+
     const now = new Date();
     const activeTierAmount = season.pricingTiers.find((tier) => now >= tier.startDate && now <= tier.endDate)?.amount;
     const fallbackTierAmount = season.pricingTiers[season.pricingTiers.length - 1]?.amount || registrationForm?.baseFee || 150;
@@ -129,7 +136,6 @@ export async function POST(request: NextRequest) {
     let insuranceStatus = 'VALID';
     if (!insurance) {
       insuranceStatus = 'REQUIRED';
-      amount += 50;
     } else if (insurance.endDate <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)) {
       insuranceStatus = 'EXPIRING_SOON';
     }

@@ -1,12 +1,34 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowRight, Calendar, Shield, Users } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Calendar, Shield, Users } from 'lucide-react'
 import { useSessionUser } from '@/hooks/use-session-user'
 import { getVisibleDashboardNavGroups } from '@/lib/dashboard-nav'
 
+type InsuranceSummary = {
+  hasActiveInsurance: boolean
+}
+
 export default function DashboardPage() {
   const { user, loading } = useSessionUser()
+  const [insuranceSummary, setInsuranceSummary] = useState<InsuranceSummary | null>(null)
+
+  useEffect(() => {
+    if (!user) {
+      return
+    }
+
+    fetch('/api/insurance', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error('Failed to load insurance')
+        }
+        return response.json()
+      })
+      .then(setInsuranceSummary)
+      .catch(() => setInsuranceSummary(null))
+  }, [user])
 
   if (loading) {
     return (
@@ -21,6 +43,28 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
+      {user?.role === 'PLAYER' && insuranceSummary?.hasActiveInsurance === false && (
+        <section className="rounded-[24px] border border-red-500/30 bg-red-500/10 p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-6 w-6 text-red-300" />
+              <div>
+                <h2 className="text-lg font-semibold text-white">Annual insurance required</h2>
+                <p className="mt-1 text-sm text-red-100/85">
+                  You cannot register for any season until your annual insurance is active.
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/dashboard/insurance-status"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-red-400 px-4 py-2 text-sm font-semibold text-slate-950"
+            >
+              Buy Insurance
+            </Link>
+          </div>
+        </section>
+      )}
+
       <section className="overflow-hidden rounded-[28px] border border-cyan-400/15 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_42%),linear-gradient(135deg,rgba(8,15,28,0.96),rgba(15,23,42,0.92))] p-6 lg:p-8">
         <div className="grid gap-6 lg:grid-cols-[1.25fr,0.75fr]">
           <div>
